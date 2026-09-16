@@ -1,7 +1,17 @@
 /Users/crivoidan/Desktop/PAD/broker-java/src/main/java/com/pubsub/broker/BrokerServer.java
 /Users/crivoidan/Desktop/PAD/broker-java/src/main/java/com/pubsub/broker/exception/InvalidMessageException.java
+/Users/crivoidan/Desktop/PAD/broker-java/src/main/java/com/pubsub/broker/grpc/GrpcBrokerServiceImpl.java
+/Users/crivoidan/Desktop/PAD/broker-java/src/main/java/com/pubsub/broker/grpc/GrpcConnectionHandler.java
 /Users/crivoidan/Desktop/PAD/broker-java/src/main/java/com/pubsub/broker/handler/ConnectionHandlerImpl.java
 /Users/crivoidan/Desktop/PAD/broker-java/src/main/java/com/pubsub/broker/model/Message.java
 /Users/crivoidan/Desktop/PAD/broker-java/src/main/java/com/pubsub/broker/net/ConnectionHandler.java
 /Users/crivoidan/Desktop/PAD/broker-java/src/main/java/com/pubsub/broker/registry/TopicRegistry.java
 /Users/crivoidan/Desktop/PAD/broker-java/src/main/java/com/pubsub/broker/util/JsonUtil.java
+/Users/crivoidan/Desktop/PAD/broker-java/target/generated-sources/protobuf/grpc-java/pubsub/BrokerGrpc.java
+/Users/crivoidan/Desktop/PAD/broker-java/target/generated-sources/protobuf/java/pubsub/Ack.java
+/Users/crivoidan/Desktop/PAD/broker-java/target/generated-sources/protobuf/java/pubsub/AckOrBuilder.java
+/Users/crivoidan/Desktop/PAD/broker-java/target/generated-sources/protobuf/java/pubsub/BrokerProto.java
+/Users/crivoidan/Desktop/PAD/broker-java/target/generated-sources/protobuf/java/pubsub/Message.java
+/Users/crivoidan/Desktop/PAD/broker-java/target/generated-sources/protobuf/java/pubsub/MessageOrBuilder.java
+/Users/crivoidan/Desktop/PAD/broker-java/target/generated-sources/protobuf/java/pubsub/SubRequest.java
+/Users/crivoidan/Desktop/PAD/broker-java/target/generated-sources/protobuf/java/pubsub/SubRequestOrBuilder.java
