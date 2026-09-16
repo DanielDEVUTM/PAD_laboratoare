@@ -1,0 +1,3 @@
+com/pubsub/broker/util/JsonUtil.class
+com/pubsub/broker/model/Message.class
+com/pubsub/broker/exception/InvalidMessageException.class
