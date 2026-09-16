@@ -1,5 +1,7 @@
 com/pubsub/broker/util/JsonUtil.class
+com/pubsub/broker/BrokerServer.class
 com/pubsub/broker/exception/InvalidMessageException.class
+com/pubsub/broker/net/ConnectionHandler.class
+com/pubsub/broker/handler/ConnectionHandlerImpl.class
 com/pubsub/broker/registry/TopicRegistry.class
 com/pubsub/broker/model/Message.class
-com/pubsub/broker/net/ConnectionHandler.class
