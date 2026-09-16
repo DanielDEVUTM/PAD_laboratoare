@@ -116,3 +116,35 @@ python publisher.py --topic meteo --mode grpc
 2. **Obiect JSON structurat:** Dacă introduceți un JSON (ex: `{"scor": "2-1"}`), va fi transmis structurat.
 3. **Comanda `reconnect`:** În modul TCP, reîncearcă manual conectarea la Broker.
 4. **Ieșire:** Tastați `exit`, `quit` sau `Ctrl+C`.
+
+---
+
+## 3. Client Subscriber (.NET C#)
+
+Aplicația Subscriber este localizată în directorul `subscriber/` și suportă ambele moduri de transport (`tcp` și `grpc`).
+
+### Rulare Mod TCP (implicit, port 5050):
+```bash
+cd subscriber
+dotnet run --topic sport
+# sau din rădăcină:
+dotnet run --project subscriber -- --topic sport
+```
+
+### Rulare Mod gRPC (port 5051):
+```bash
+cd subscriber
+dotnet run --topic sport --mode grpc
+# sau din rădăcină:
+dotnet run --project subscriber -- --topic sport --mode grpc
+```
+
+### Rulare simultană a mai multor Subscriberi în paralel:
+```bash
+# Terminal 1 (abonat la sport):
+dotnet run --project subscriber -- --topic sport --mode tcp
+
+# Terminal 2 (abonat la stiri):
+dotnet run --project subscriber -- --topic stiri --mode tcp
+```
+Oprirea se face curat cu `Ctrl+C`, fără a afecta brokerul sau alți clienți.
