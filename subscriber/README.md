@@ -1,42 +1,78 @@
 # Subscriber Client (C# / .NET)
 
-Client de tip **Subscriber** dezvoltat în C# (.NET 8) pentru un sistem distribuit de mesagerie Pub/Sub, conectat prin socket TCP direct la Brokerul de mesaje (Java).
+Client de tip **Subscriber** dezvoltat în C# (.NET 8) pentru un sistem distribuit de mesagerie Pub/Sub.
+Suportă două moduri de transport:
+1. **TCP raw** (implicit, port 5050): conectare prin socket direct, mesaje newline-delimited JSON (`\n`).
+2. **gRPC streaming** (port 5051): apel de tip server-streaming bazat pe `broker.proto` (`rpc Subscribe(SubRequest) returns (stream Message)`).
 
 ---
 
 ## Caracteristici Cheie
 
-1. **Protocol TCP direct & Handshake JSON**:
-   - Conectare pe socket TCP la adresa Broker-ului (`127.0.0.1:5050` implicit).
-   - Trimitere handshake la conectare: `{"role": "subscriber", "topic": "<topic>"}\n`.
-   - Primire mesaje JSON transmise linie cu linie (`\n`) de către Broker:
-     ```json
-     {
-       "id": "<uuid>",
-       "topic": "<topic>",
-       "payload": { ... },
-       "timestamp": "<ISO8601>"
-     }
-     ```
-2. **Citire continuă pe Task/Thread dedicat**:
-   - Folosește `System.Text.Json` pentru parsarea asincronă și performantă a mesajelor primite.
-   - Afișează clar în consolă topicul, timestamp-ul, id-ul și payload-ul structurat.
-3. **Reconectare automată cu Exponential Backoff**:
-   - Dacă Broker-ul nu este pornit sau conexiunea de rețea cade brusc, clientul reîncearcă automat conectarea la intervale de **1s, 2s, 4s**.
-   - Dacă toate încercările eșuează, afișează un mesaj de eroare critică clar, fără crash sau excepții netratate.
-4. **Închidere curată (Graceful Shutdown)**:
-   - La `Ctrl+C` (SIGINT) sau ieșirea din proces, socketul TCP apelează `Shutdown` și este închis curat.
-   - Trimiterea semnalului de închidere generează un EOF (`null`) pe serverul Java, permițând brokerului să șteargă subscriber-ul din registrul de topicuri (`TopicRegistry`) fără a afecta restul sistemului sau ceilalți clienți.
-5. **Suport pentru clienți multipli în paralel**:
-   - Se pot deschide oricâte terminale/instanțe, fiecare abonat la un topic distinct (ex: `sport`, `stiri`, `meteo`).
+### 1. Modul TCP Raw (`--mode tcp` - implicit)
+- **Conectare & Handshake**:
+  - Se conectează pe socket TCP la adresa Broker-ului (`127.0.0.1:5050` implicit).
+  - Trimite handshake JSON: `{"role": "subscriber", "topic": "<topic>"}\n`.
+- **Format Mesaj**:
+  ```json
+  {
+    "id": "<uuid>",
+    "topic": "<topic>",
+    "payload": { ... },
+    "timestamp": "<ISO8601>"
+  }
+  ```
+- **Ascultare pe Task dedicat**: folosește `System.Text.Json` pentru parsarea mesajelor primite linie cu linie.
+
+### 2. Modul gRPC Streaming (`--mode grpc`)
+- **Definiție Proto (`broker.proto`)**:
+  ```protobuf
+  syntax = "proto3";
+  package pubsub;
+
+  service Broker {
+    rpc Publish(Message) returns (Ack);
+    rpc Subscribe(SubRequest) returns (stream Message);
+  }
+
+  message Message {
+    string id = 1;
+    string topic = 2;
+    string payload = 3;
+    string timestamp = 4;
+  }
+
+  message Ack {
+    bool success = 1;
+    string detail = 2;
+  }
+
+  message SubRequest {
+    string topic = 1;
+  }
+  ```
+- **Server Streaming**: apelează RPC-ul `Subscribe(SubRequest)` și citește asincron fluxul de `Message` prin `call.ResponseStream.ReadAllAsync()`.
+- **Generare cod**: realizată automat la `dotnet build` folosind pachetul `Grpc.Tools` configurat în `Subscriber.csproj`.
+
+### 3. Reconectare Automată cu Exponential Backoff (Ambele Moduri)
+- Dacă Broker-ul nu este disponibil la pornire sau conexiunea/stream-ul cade în timpul funcționării (`SocketException`, `RpcException`), clientul reîncearcă automat conectarea la intervale de **1s, 2s, 4s**.
+- Dacă toate încercările eșuează, afișează un mesaj clar de eroare critică, fără crash sau blocare.
+
+### 4. Închidere Curată (Graceful Shutdown)
+- La `Ctrl+C` (SIGINT) sau terminarea procesului:
+  - În modul **TCP**: socketul apelează `Shutdown(SocketShutdown.Both)` și se închide curat. Broker-ul detectează `EOF` (`null`) și dezabonează clientul din `TopicRegistry`.
+  - În modul **gRPC**: tokenul de anulare oprește stream-ul și trimite `RST_STREAM` / `CANCEL`, declanșând `onCancelHandler` pe brokerul Java.
+- **Niciun alt subscriber sau publisher conectat la broker nu este afectat.**
 
 ---
 
-## Structura Proiectului
+## Structura Proiectului (`subscriber/`)
 
-- `SubscriberClient.cs`: Clasa principală a clientului ce conține metodele `ConnectAsync`, `ListenAsync`, `ReconnectAsync` și `Close`.
-- `Program.cs`: Punctul de intrare (Main), parsarea argumentelor (`--topic`, `--host`, `--port`), capturarea semnalelor `Console.CancelKeyPress` și gestionarea ciclului de viață.
-- `Subscriber.csproj`: Proiectul .NET configurat pe `net8.0`.
+- [`subscriber/Protos/broker.proto`](file:///c:/Users/Mihai/Desktop/PAD_laboratoare/subscriber/Protos/broker.proto): Fișierul de definiție protocol buffer gRPC.
+- [`subscriber/SubscriberClient.cs`](file:///c:/Users/Mihai/Desktop/PAD_laboratoare/subscriber/SubscriberClient.cs): Implementarea clientului TCP (Connect, Listen, Reconnect, Close).
+- [`subscriber/SubscriberGrpcClient.cs`](file:///c:/Users/Mihai/Desktop/PAD_laboratoare/subscriber/SubscriberGrpcClient.cs): Implementarea clientului gRPC streaming (Listen, Reconnect, Close).
+- [`subscriber/Program.cs`](file:///c:/Users/Mihai/Desktop/PAD_laboratoare/subscriber/Program.cs): Parsare argumente (`--topic`, `--mode`, `--host`, `--port`) și tratare semnal `Ctrl+C`.
+- [`subscriber/Subscriber.csproj`](file:///c:/Users/Mihai/Desktop/PAD_laboratoare/subscriber/Subscriber.csproj): Fișierul de proiect .NET 8 cu dependințe `Grpc.Net.Client`, `Google.Protobuf`, `Grpc.Tools`.
 
 ---
 
@@ -44,34 +80,49 @@ Client de tip **Subscriber** dezvoltat în C# (.NET 8) pentru un sistem distribu
 
 ### 1. Rulare din folderul `subscriber`
 
-Deschideți un terminal în folderul `subscriber`:
+Navigați în folderul `subscriber`:
 ```bash
 cd subscriber
 ```
 
-Porniți subscriberul specificând topicul dorit:
+#### Modul TCP (implicit, port 5050):
 ```bash
-# Terminal 1 (pentru topicul sport):
+# Terminal 1:
 dotnet run --topic sport
 
-# Terminal 2 (pentru topicul stiri):
+# Terminal 2 (în paralel pe alt topic):
 dotnet run --topic stiri
 
-# Terminal 3 (opțiuni avansate host/port):
+# Opțional cu host și port:
 dotnet run --topic meteo --host 127.0.0.1 --port 5050
 ```
 
-### 2. Rulare din rădăcina depozitului
-
-Dacă vă aflați în rădăcina proiectului:
+#### Modul gRPC (port 5051):
 ```bash
 # Terminal 1:
-dotnet run --project subscriber -- --topic sport
+dotnet run --topic sport --mode grpc
 
-# Terminal 2:
+# Terminal 2 (în paralel pe alt topic):
+dotnet run --topic stiri --mode grpc
+
+# Opțional cu host și port:
+dotnet run --topic meteo --mode grpc --host 127.0.0.1 --port 5051
+```
+
+---
+
+### 2. Rulare din rădăcina depozitului
+
+```bash
+# Mod TCP:
+dotnet run --project subscriber -- --topic sport
 dotnet run --project subscriber -- --topic stiri
+
+# Mod gRPC:
+dotnet run --project subscriber -- --topic sport --mode grpc
+dotnet run --project subscriber -- --topic stiri --mode grpc
 ```
 
 ### 3. Oprire Curată
 
-Apăsați `Ctrl+C` în orice terminal pentru a deconecta curat acel subscriber.
+Apăsați `Ctrl+C` în fereastra subscriberului pentru a-l deconecta curat fără erori.
