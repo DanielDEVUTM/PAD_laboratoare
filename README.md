@@ -1,95 +1,118 @@
 # Sistem Pub/Sub - Client Publisher (Python)
 
 Aplicație client pentru rolul de **Publisher** într-un sistem distribuit de mesagerie de tip Publish/Subscribe (Pub/Sub).
-Sistemul este alcătuit din:
-- **Broker**: Java (TCP Server, implicit `127.0.0.1:5050`)
-- **Publisheri**: Python (acest modul)
-- **Subscriberi**: C#
+Suportă două moduri de transport:
+1. **TCP raw** (implicit): socket TCP direct, mesaje newline-delimited JSON (`\n`).
+2. **gRPC**: apeluri procedurale la distanță bazate pe protocol buffers (`broker.proto`).
 
 ---
 
-## Cerințe și Protocol
+## 1. Modul TCP raw
 
-### 1. Conectare și Handshake
-La deschiderea conexiunii TCP către Broker, Publisher-ul trimite imediat un mesaj de înregistrare JSON pe o singură linie (delimitat cu `\n`):
+### Conectare și Handshake
+La conectare, Publisher-ul trimite pe socket-ul TCP:
 ```json
 {"role": "publisher", "topic": "sport"}
 ```
 
-### 2. Trimiterea Mesajelor
-După handshake, fiecare mesaj publicat este serializat JSON pe o linie separată (`\n`):
+### Formatul Mesajelor
 ```json
 {
-  "id": "c1f760e9-b5d2-4309-9069-fbbaee2a3cf2",
+  "id": "uuid4",
   "topic": "sport",
   "payload": {
-    "text": "Echipa gazdă a înscris un gol!"
+    "text": "Mesaj de test"
   },
   "timestamp": "2026-09-16T11:15:30.123456+00:00"
 }
 ```
 
-### 3. Confirmare de la Broker (ACK)
-Pentru fiecare mesaj transmis, Broker-ul răspunde cu:
-- Succes: `{"status": "ok"}`
-- Eroare: `{"status": "error", "reason": "descriere eroare"}`
-
-### 4. Reconectare cu Backoff
-Dacă Broker-ul nu este pornit sau conexiunea se întrerupe, clientul încearcă reconectarea aplicând pauze exponențiale:
-- Încercarea 1: eșec -> pauză 1 secundă
-- Încercarea 2: eșec -> pauză 2 secunde
-- Încercarea 3: eșec -> pauză 4 secunde
-- La epuizarea încercărilor, afișează un mesaj clar de eroare, fără blocaj și **fără să crape programul**.
+### Răspuns Broker (ACK)
+- `{"status": "ok"}` sau `{"status": "error", "reason": "..."}`
 
 ---
 
-## Structura Proiectului
+## 2. Modul gRPC
 
-- `publisher_client.py`: Clasa `PublisherClient` (metodele `connect`, `publish`, `close`, citire bufferizată de stream TCP, generare automată UUID4 și timestamp ISO8601 UTC).
-- `main.py`: Punctul de intrare cu argumente din linia de comandă (`argparse`) și buclă interactivă.
-- `publisher.py`: Alias pentru `main.py` (pentru a putea rula `python publisher.py ...`).
+Definiția serviciului este declarată în `broker.proto`:
+
+```protobuf
+syntax = "proto3";
+package pubsub;
+
+service Broker {
+  rpc Publish(Message) returns (Ack);
+  rpc Subscribe(SubRequest) returns (stream Message);
+}
+
+message Message {
+  string id = 1;
+  string topic = 2;
+  string payload = 3;   // JSON serializat ca string
+  string timestamp = 4;
+}
+
+message Ack {
+  bool success = 1;
+  string detail = 2;
+}
+
+message SubRequest {
+  string topic = 1;
+}
+```
+
+### Generare Stub-uri Python (dacă se modifică proto)
+```bash
+python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. broker.proto
+```
 
 ---
 
-## Rulare
+## Ghid de Rulare
 
-### Sintaxă generală
+### Sintaxă generală:
 ```bash
-python main.py --topic <nume_topic> [--host <ip_broker>] [--port <port_broker>]
+python main.py --topic <nume_topic> [--mode {tcp,grpc}] [--host <adresa_ip>] [--port <port>]
 ```
-sau
+sau folosind aliasul:
 ```bash
-python publisher.py --topic <nume_topic> [--host <ip_broker>] [--port <port_broker>]
+python publisher.py --topic <nume_topic> [--mode {tcp,grpc}] [--host <adresa_ip>] [--port <port>]
 ```
-
-> **Notă:** Parametrii `--host` (implicit `127.0.0.1`) și `--port` (implicit `5050`) sunt opționali.
 
 ---
 
-### Exemplu: Pornirea a 3 Publisheri în terminale separate
+### Exemple de rulare:
 
-Deschideți 3 ferestre de terminal (PowerShell sau CMD) și rulați:
-
-#### Terminal 1 (Topic: `sport`)
+#### Rulare în mod TCP (implicit, port 5050):
 ```bash
-python publisher.py --topic sport --host 127.0.0.1 --port 5050
+# Terminal 1:
+python publisher.py --topic sport --mode tcp --host 127.0.0.1 --port 5050
+
+# Terminal 2:
+python publisher.py --topic stiri --mode tcp
+
+# Terminal 3:
+python publisher.py --topic meteo --mode tcp
 ```
 
-#### Terminal 2 (Topic: `stiri`)
+#### Rulare în mod gRPC (port 50051):
 ```bash
-python publisher.py --topic stiri --host 127.0.0.1 --port 5050
-```
+# Terminal 1:
+python publisher.py --topic sport --mode grpc --host 127.0.0.1 --port 50051
 
-#### Terminal 3 (Topic: `meteo`)
-```bash
-python publisher.py --topic meteo --host 127.0.0.1 --port 5050
+# Terminal 2:
+python publisher.py --topic stiri --mode grpc
+
+# Terminal 3:
+python publisher.py --topic meteo --mode grpc
 ```
 
 ---
 
 ## Utilizare în bucla interactivă
 
-1. **Text simplu:** Tastați orice mesaj și apăsați `Enter`. Acesta va fi împachetat automat ca `{"text": "<mesajul_dvs>"}`.
-2. **Obiect JSON structurat:** Dacă introduceți direct un JSON valid (ex: `{"temperatura": 23.5, "oras": "Chisinau"}`), acesta va fi trimis direct ca obiect în `payload`.
-3. **Comanda `reconnect`:** Tastați `reconnect` pentru a forța o reîncercare manuală de conectare la Broker.
-4. **Ieșire:** Tastați `exit`, `quit` sau apăsați combinația `Ctrl+C`.
+1. **Text simplu:** Tastați mesajul și apăsați `Enter`. În TCP devine `{"text": "<mesaj>"}`, iar în gRPC este serializat ca string JSON.
+2. **Obiect JSON structurat:** Dacă introduceți un JSON (ex: `{"scor": "2-1"}`), va fi transmis structurat.
+3. **Comanda `reconnect`:** În modul TCP, reîncearcă manual conectarea la Broker.
+4. **Ieșire:** Tastați `exit`, `quit` sau `Ctrl+C`.
