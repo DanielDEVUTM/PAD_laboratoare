@@ -10,6 +10,7 @@ pubsub/Message$1.class
 pubsub/BrokerGrpc$BrokerFutureStub.class
 com/pubsub/broker/grpc/GrpcConnectionHandler.class
 com/pubsub/broker/BrokerServer.class
+com/pubsub/broker/dlq/DeadLetterQueue.class
 pubsub/MessageOrBuilder.class
 com/pubsub/broker/handler/ConnectionHandlerImpl.class
 pubsub/BrokerGrpc$BrokerMethodDescriptorSupplier.class
@@ -25,6 +26,7 @@ com/pubsub/broker/model/Message.class
 pubsub/BrokerGrpc$2.class
 pubsub/Ack.class
 pubsub/BrokerGrpc$BrokerBaseDescriptorSupplier.class
+com/pubsub/broker/dlq/DeadLetterQueue$DeadLetterEntry.class
 pubsub/AckOrBuilder.class
 pubsub/BrokerGrpc$BrokerImplBase.class
 pubsub/Ack$Builder.class

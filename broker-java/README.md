@@ -19,13 +19,17 @@ Acest proiect reprezintă un broker de mesaje **Publish/Subscribe** dezvoltat î
    - Gestionează un **backlog temporar** (`ConcurrentLinkedQueue<Message>`) pentru fiecare topic; dacă un mesaj este publicat pe un topic fără abonati activi, mesajul este păstrat în backlog și livrat imediat primului subscriber care se abonează ulterior.
    - Deconectarea unui client elimină handler-ul din listă fără să afecteze funcționarea brokerului sau a celorlalți clienți.
 
-3. **`ConnectionHandlerImpl` (TCP)**:
+3. **`DeadLetterQueue` (DLQ - Bonus Nota 10)**:
+   - Coadă thread-safe (`ConcurrentLinkedQueue`) în care sunt redirecționate toate mesajele malformate (JSON invalid) sau mesajele care nu au putut fi livrate din cauza erorilor de rețea.
+   - Oferă trasabilitate și izolare a erorilor pentru debugging.
+
+4. **`ConnectionHandlerImpl` (TCP)**:
    - Fiecare socket acceptat pe portul 5050 este procesat pe un thread separat dintr-un `ExecutorService` (`newCachedThreadPool`).
    - Citește prima linie JSON pentru handshake: `{"role":"publisher"|"subscriber", "topic":"..."}`.
    - **Subscriber**: Rămâne conectat și ascultă până la deconectare (detectată de `readLine() == null` sau `IOException`), moment în care este dezabonat.
    - **Publisher**: Rămâne într-o buclă citind mesaje JSON, le validează/deserializează, apelează `topicRegistry.broadcast(...)` și trimite răspunsul `{"status":"ok"}` sau `{"status":"error"}`.
 
-4. **`GrpcBrokerServiceImpl` & `GrpcConnectionHandler` (gRPC)**:
+5. **`GrpcBrokerServiceImpl` & `GrpcConnectionHandler` (gRPC)**:
    - Implementează serviciul gRPC definit în `broker.proto`.
    - RPC `Publish(Message)`: Validează mesajul și face broadcast reutilizând `TopicRegistry`.
    - RPC `Subscribe(SubRequest)` (server streaming): Creează o adaptare `GrpcConnectionHandler` în `TopicRegistry` și trimite mesaje în timp real prin stream-ul `StreamObserver<Message>`.

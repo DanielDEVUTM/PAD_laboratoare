@@ -1,5 +1,6 @@
 package com.pubsub.broker.registry;
 
+import com.pubsub.broker.dlq.DeadLetterQueue;
 import com.pubsub.broker.model.Message;
 import com.pubsub.broker.net.ConnectionHandler;
 
@@ -38,9 +39,11 @@ public class TopicRegistry {
                 try {
                     handler.send(msg);
                 } catch (IOException e) {
+                    DeadLetterQueue.addFailedMessage(topic, msg, "Trimitere din backlog eșuată (subscriber deconectat): " + e.getMessage());
                     removeSubscriber(topic, handler);
                     break;
                 } catch (Exception e) {
+                    DeadLetterQueue.addFailedMessage(topic, msg, "Excepție neașteptată trimitere din backlog: " + e.getMessage());
                     removeSubscriber(topic, handler);
                     break;
                 }
@@ -61,6 +64,7 @@ public class TopicRegistry {
 
     public void broadcast(String topic, Message message) {
         if (topic == null || message == null) {
+            DeadLetterQueue.addMalformedMessage("null", "Topic sau Message null transmis în broadcast");
             return;
         }
 
@@ -79,10 +83,10 @@ public class TopicRegistry {
             try {
                 handler.send(message);
             } catch (IOException e) {
-                // Dacă trimiterea eșuează, eliminăm handler-ul din listă și continuăm cu restul
+                DeadLetterQueue.addFailedMessage(topic, message, "Eșec livrare către subscriber (deconectat): " + e.getMessage());
                 removeSubscriber(topic, handler);
             } catch (Exception e) {
-                // Orice altă excepție neașteptată
+                DeadLetterQueue.addFailedMessage(topic, message, "Excepție neașteptată livrare: " + e.getMessage());
                 removeSubscriber(topic, handler);
             }
         }

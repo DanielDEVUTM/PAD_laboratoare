@@ -1,6 +1,7 @@
 package com.pubsub.broker.handler;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.pubsub.broker.dlq.DeadLetterQueue;
 import com.pubsub.broker.exception.InvalidMessageException;
 import com.pubsub.broker.model.Message;
 import com.pubsub.broker.net.ConnectionHandler;
@@ -57,12 +58,14 @@ public class ConnectionHandlerImpl implements ConnectionHandler, Runnable {
             try {
                 handshakeNode = JsonUtil.fromJson(line, JsonNode.class);
             } catch (InvalidMessageException e) {
+                DeadLetterQueue.addMalformedMessage(line, "Handshake JSON invalid: " + e.getMessage());
                 sendRawResponse(JsonUtil.toJson(Map.of("status", "error", "reason", "Handshake JSON invalid: " + e.getMessage())));
                 closeQuietly();
                 return;
             }
 
             if (handshakeNode == null || !handshakeNode.has("role") || !handshakeNode.has("topic")) {
+                DeadLetterQueue.addMalformedMessage(line, "Handshake incomplet - lipsește role sau topic");
                 sendRawResponse(JsonUtil.toJson(Map.of("status", "error", "reason", "Handshake-ul trebuie să conțină role și topic")));
                 closeQuietly();
                 return;
@@ -78,6 +81,7 @@ public class ConnectionHandlerImpl implements ConnectionHandler, Runnable {
             } else if ("publisher".equalsIgnoreCase(role)) {
                 handlePublisher(topic);
             } else {
+                DeadLetterQueue.addMalformedMessage(line, "Role invalid în handshake: " + role);
                 sendRawResponse(JsonUtil.toJson(Map.of("status", "error", "reason", "Role invalid: " + role)));
                 closeQuietly();
             }
@@ -120,6 +124,7 @@ public class ConnectionHandlerImpl implements ConnectionHandler, Runnable {
                     sendRawResponse(JsonUtil.toJson(Map.of("status", "ok")));
                 } catch (InvalidMessageException e) {
                     log("Eroare parsare mesaj publicat: " + e.getMessage());
+                    DeadLetterQueue.addMalformedMessage(line, "Mesaj malformat de la publisher: " + e.getMessage());
                     sendRawResponse(JsonUtil.toJson(Map.of("status", "error", "reason", e.getMessage())));
                 }
             }
