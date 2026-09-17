@@ -308,7 +308,10 @@ async function addPublisher(){
     body: JSON.stringify({ topic, name })
   });
   const data = await res.json();
-  if(data.status !== "ok") return;
+  if(data.status !== "ok"){
+    alert(data.reason || "Nu s-a putut adăuga publisherul.");
+    return;
+  }
 
   pubs[data.id] = { topic };
 
@@ -424,7 +427,10 @@ async function addSubscriber(){
     body: JSON.stringify({ topic, name })
   });
   const data = await res.json();
-  if(data.status !== "ok") return;
+  if(data.status !== "ok"){
+    alert(data.reason || "Nu s-a putut adăuga subscriberul.");
+    return;
+  }
 
   subs[data.id] = { topic, since: 0 };
 

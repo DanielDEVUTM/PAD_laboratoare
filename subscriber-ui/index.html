@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subscriber App</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#121927; --panel-2:#0f1521; --border:#232f45;
+    --text:#e7ecf5; --text-dim:#8a96ab; --accent:#c084fc;
+    --ok:#4ade80; --err:#f87171; --warn:#fbbf24; --mono:'Consolas','SFMono-Regular',Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,Segoe UI,Roboto,sans-serif;}
+  header{
+    display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    padding:14px 20px; border-bottom:1px solid var(--border); background:var(--panel-2);
+  }
+  header h1{font-size:16px; margin:0;}
+  header h1 span{color:var(--accent);}
+  .target{font-size:12px; color:var(--text-dim); font-family:var(--mono);}
+  .status{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim);}
+  .dot{width:8px; height:8px; border-radius:50%; background:var(--text-dim);}
+  .dot.on{background:var(--ok); box-shadow:0 0 6px var(--ok);}
+  .dot.off{background:var(--err); box-shadow:0 0 6px var(--err);}
+  .dot.connected{background:var(--ok); box-shadow:0 0 5px var(--ok);}
+  .dot.reconnecting{background:var(--warn); box-shadow:0 0 5px var(--warn);}
+
+  main{max-width:640px; margin:0 auto; padding:20px 16px 60px;}
+  label{font-size:11.5px; color:var(--text-dim); display:block; margin-bottom:4px;}
+  input[type=text]{
+    width:100%; background:var(--panel-2); border:1px solid var(--border); border-radius:8px;
+    color:var(--text); padding:9px 10px; font-size:13px; font-family:var(--mono);
+  }
+  .row{display:flex; gap:8px; margin-bottom:10px;}
+  .row > *{flex:1;}
+  button{
+    background:var(--accent); color:#1c0730; border:none; border-radius:8px;
+    padding:9px 14px; font-size:13px; font-weight:700; cursor:pointer;
+  }
+  button:disabled{opacity:.5; cursor:not-allowed;}
+
+  .sub-card{border:1px solid var(--border); border-radius:10px; background:var(--panel); overflow:hidden; margin-bottom:14px;}
+  .sub-card-head{display:flex; align-items:center; gap:8px; padding:9px 12px; border-bottom:1px solid var(--border); font-size:12px;}
+  .sub-card-head .topic{font-weight:700; font-family:var(--mono);}
+  .sub-card-head .id{color:var(--text-dim); font-family:var(--mono); font-size:10.5px;}
+  .sub-card-head .spacer{flex:1;}
+  .sub-card-head button{background:transparent; color:var(--err); border:none; font-size:16px; padding:2px 6px;}
+  .sub-card-body{max-height:220px; overflow:auto; padding:10px 12px; display:flex; flex-direction:column; gap:8px;}
+  .sub-msg{font-size:12px; border-bottom:1px dashed var(--border); padding-bottom:6px;}
+  .sub-msg .top{display:flex; justify-content:space-between; color:var(--text-dim); font-size:10.5px; font-family:var(--mono); margin-bottom:3px;}
+  .sub-msg pre{margin:0; white-space:pre-wrap; word-break:break-word; font-family:var(--mono); font-size:12px;}
+  .empty{color:var(--text-dim); font-size:12.5px; text-align:center; padding:24px 8px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Subscriber <span>App</span></h1>
+  <div class="target">Broker țintă: <span id="targetLabel">...</span></div>
+  <div class="status">
+    <span id="statusDot" class="dot"></span>
+    <span id="statusText">Verific...</span>
+  </div>
+</header>
+
+<main>
+  <div class="row">
+    <div>
+      <label for="subTopic">Topic</label>
+      <input type="text" id="subTopic" placeholder="ex: sport" value="sport">
+    </div>
+    <div>
+      <label for="subName">Nume subscriber (opțional)</label>
+      <input type="text" id="subName" placeholder="ex: S1 — reconectează cu același nume">
+    </div>
+  </div>
+  <button id="subAdd">+ Adaugă subscriber</button>
+  <div style="font-size:11px; color:var(--text-dim); margin-top:8px;">
+    Fără nume, subscriberul e „unic” — dacă îl ștergi, mesajele acumulate pentru el nu mai pot fi recuperate.
+    Cu un nume, reconectezi „același” subscriber și primești tot ce a ratat.
+  </div>
+
+  <div id="subList" style="margin-top:16px;">
+    <div class="empty">Niciun subscriber activ. Adaugă unul ca să vezi mesajele publicate live.</div>
+  </div>
+</main>
+
+<script>
+function el(id){ return document.getElementById(id); }
+const subs = {};
+
+async function loadConfig(){
+  try{
+    const res = await fetch("/api/config");
+    const cfg = await res.json();
+    el("targetLabel").textContent = `${cfg.brokerHost}:${cfg.brokerTcpPort}`;
+  } catch(e){
+    el("targetLabel").textContent = "necunoscut";
+  }
+}
+
+function setStatus(online){
+  el("statusDot").className = "dot " + (online ? "on" : "off");
+  el("statusText").textContent = online ? "Broker conectat" : "Broker indisponibil";
+}
+
+function fmtTime(iso){
+  if(!iso) return "";
+  try{ return new Date(iso).toLocaleTimeString(); } catch(e){ return iso; }
+}
+
+function subCardHtml(id, topic, subscriberId){
+  return `
+    <div class="sub-card" id="subcard-${id}">
+      <div class="sub-card-head">
+        <span class="dot" id="subdot-${id}"></span>
+        <span class="topic">${topic}</span>
+        <span class="id">${subscriberId}</span>
+        <span class="spacer"></span>
+        <span id="subcount-${id}" style="color:var(--text-dim); font-size:10.5px;">0 msg</span>
+        <button title="Șterge" data-remove="${id}">×</button>
+      </div>
+      <div class="sub-card-body" id="subbody-${id}">
+        <div class="empty">Se conectează la Broker...</div>
+      </div>
+    </div>
+  `;
+}
+
+async function addSubscriber(){
+  const topic = el("subTopic").value.trim();
+  const name = el("subName").value.trim();
+  if(!topic) return;
+
+  const res = await fetch("/api/subscribers", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ topic, name })
+  });
+  const data = await res.json();
+  if(data.status !== "ok"){
+    alert(data.reason || "Nu s-a putut adăuga subscriberul.");
+    return;
+  }
+
+  subs[data.id] = { topic, since: 0 };
+  const list = el("subList");
+  const emptyMsg = list.querySelector(".empty");
+  if(emptyMsg) list.innerHTML = "";
+  list.insertAdjacentHTML("beforeend", subCardHtml(data.id, topic, data.subscriberId));
+
+  document.querySelector(`#subcard-${data.id} [data-remove]`).addEventListener("click", () => removeSubscriber(data.id));
+}
+
+async function removeSubscriber(id){
+  await fetch("/api/subscribers/" + id, { method: "DELETE" });
+  delete subs[id];
+  const card = el(`subcard-${id}`);
+  if(card) card.remove();
+  if(Object.keys(subs).length === 0){
+    el("subList").innerHTML = `<div class="empty">Niciun subscriber activ. Adaugă unul ca să vezi mesajele publicate live.</div>`;
+  }
+}
+
+async function pollSubscriberMessages(){
+  for(const id of Object.keys(subs)){
+    try{
+      const res = await fetch(`/api/subscribers/${id}/messages?since=${subs[id].since}`);
+      if(res.status === 404){
+        delete subs[id];
+        const card = el(`subcard-${id}`);
+        if(card) card.remove();
+        continue;
+      }
+      const data = await res.json();
+
+      const dot = el(`subdot-${id}`);
+      if(dot) dot.className = "dot " + (data.status === "connected" ? "connected" : data.status === "reconnecting" ? "reconnecting" : "");
+
+      if(data.messages && data.messages.length){
+        const body = el(`subbody-${id}`);
+        const emptyMsg = body.querySelector(".empty");
+        if(emptyMsg) body.innerHTML = "";
+        for(const m of data.messages){
+          const div = document.createElement("div");
+          div.className = "sub-msg";
+          div.innerHTML = `<div class="top"><span>#${m.index} · ${m.id ? m.id.slice(0,8) : "?"}</span><span>${fmtTime(m.timestamp)}</span></div>` +
+            `<pre>${typeof m.payload === "object" ? JSON.stringify(m.payload) : m.payload}</pre>`;
+          body.appendChild(div);
+        }
+        body.scrollTop = body.scrollHeight;
+        subs[id].since = data.latest;
+        const countEl = el(`subcount-${id}`);
+        if(countEl) countEl.textContent = `${data.latest} msg`;
+      }
+    } catch(e){ /* silent, retried next tick */ }
+  }
+}
+
+async function pollStatus(){
+  try{
+    const res = await fetch("/api/subscribers");
+    if(!res.ok) throw new Error();
+    setStatus(true);
+  } catch(e){ setStatus(false); }
+}
+
+el("subAdd").addEventListener("click", addSubscriber);
+
+loadConfig();
+pollStatus();
+setInterval(pollSubscriberMessages, 1000);
+setInterval(pollStatus, 2000);
+</script>
+</body>
+</html>

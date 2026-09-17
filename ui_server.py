@@ -57,7 +57,7 @@ _publishers_lock = threading.Lock()
 _publishers: Dict[str, Dict[str, Any]] = {}
 
 
-def _create_subscriber(topic: str, name: Optional[str] = None) -> Dict[str, str]:
+def _create_subscriber(topic: str, name: Optional[str] = None) -> Optional[Dict[str, str]]:
     sub_id = uuid.uuid4().hex[:8]
     # The subscriberId is what the BROKER uses to recognize "the same subscriber"
     # across disconnect/reconnect (see TopicRegistry.addIdentifiedSubscriber).
@@ -67,19 +67,29 @@ def _create_subscriber(topic: str, name: Optional[str] = None) -> Dict[str, str]
     # for as long as this particular card lives, but a NEW card next time means
     # a NEW identity - so naming it is what makes "reconnect and catch up" possible.
     subscriber_id = name.strip() if name and name.strip() else sub_id
-    entry = {
-        "id": sub_id,
-        "topic": topic,
-        "subscriberId": subscriber_id,
-        "status": "connecting",
-        "stop_event": threading.Event(),
-        "socket": None,
-        "feed": [],
-        "counter": 0,
-        "createdAt": time.strftime("%Y-%m-%d %H:%M:%S"),
-    }
+
     with _subscribers_lock:
+        # Two ACTIVE cards with the same subscriberId on the same topic would
+        # silently collide at the broker (the second connection overwrites the
+        # first one's routing entry - see TopicRegistry.addIdentifiedSubscriber).
+        # Block that here instead of letting it happen invisibly. Reusing a
+        # name AFTER removing the earlier card is still fine and intended -
+        # that's exactly how you replay a missed backlog.
+        if name and name.strip() and _name_taken_on_topic(_subscribers, topic, subscriber_id, "subscriberId"):
+            return None
+        entry = {
+            "id": sub_id,
+            "topic": topic,
+            "subscriberId": subscriber_id,
+            "status": "connecting",
+            "stop_event": threading.Event(),
+            "socket": None,
+            "feed": [],
+            "counter": 0,
+            "createdAt": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
         _subscribers[sub_id] = entry
+
     threading.Thread(target=_subscriber_worker, args=(sub_id,), daemon=True).start()
     return {"id": sub_id, "subscriberId": subscriber_id}
 
@@ -198,9 +208,23 @@ def _subscriber_worker(sub_id: str) -> None:
             time.sleep(0.1)
 
 
-def _create_publisher(topic: str, name: Optional[str] = None) -> Dict[str, str]:
+def _name_taken_on_topic(existing: Dict[str, Dict[str, Any]], topic: str, name: str, field: str) -> bool:
+    return any(e["topic"] == topic and e[field] == name for e in existing.values())
+
+
+def _create_publisher(topic: str, name: Optional[str] = None) -> Optional[Dict[str, str]]:
     pub_id = uuid.uuid4().hex[:8]
     display_name = name.strip() if name and name.strip() else pub_id
+
+    with _publishers_lock:
+        # Only user-chosen names are checked - random ids can't collide anyway,
+        # and two publishers with the SAME name on the SAME topic would be
+        # confusing in the UI even though the protocol itself has no publisher
+        # identity concept (unlike subscribers, a publisher can't collide at
+        # the broker - this is purely a UI clarity guard).
+        if name and name.strip() and _name_taken_on_topic(_publishers, topic, display_name, "name"):
+            return None
+
     client = PublisherClient(host=BROKER_HOST, port=BROKER_TCP_PORT, topic=topic, timeout=5.0)
     connected = client.connect(retries=1)
     entry = {
@@ -214,6 +238,11 @@ def _create_publisher(topic: str, name: Optional[str] = None) -> Dict[str, str]:
         "createdAt": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     with _publishers_lock:
+        if name and name.strip() and _name_taken_on_topic(_publishers, topic, display_name, "name"):
+            # Lost a race against another request naming the same publisher
+            # between our check above and now - discard this connection.
+            client.close()
+            return None
         _publishers[pub_id] = entry
     return {"id": pub_id, "name": display_name, "status": entry["status"]}
 
@@ -282,6 +311,9 @@ def add_publisher():
         return jsonify({"status": "error", "reason": "Topic lipsa"}), 400
 
     created = _create_publisher(topic, name)
+    if created is None:
+        return jsonify({"status": "error",
+                         "reason": f"Există deja un publisher numit „{name.strip()}” pe topicul „{topic}”"}), 409
     return jsonify({"status": "ok", "id": created["id"], "name": created["name"],
                      "topic": topic, "connectionStatus": created["status"]})
 
@@ -344,6 +376,9 @@ def add_subscriber():
         return jsonify({"status": "error", "reason": "Topic lipsa"}), 400
 
     created = _create_subscriber(topic, name)
+    if created is None:
+        return jsonify({"status": "error",
+                         "reason": f"Există deja un subscriber numit „{name.strip()}” pe topicul „{topic}”"}), 409
     return jsonify({"status": "ok", "id": created["id"], "subscriberId": created["subscriberId"], "topic": topic})
 
 

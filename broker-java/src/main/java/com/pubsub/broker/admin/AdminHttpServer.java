@@ -26,10 +26,37 @@ public class AdminHttpServer {
 
     public AdminHttpServer(int port, TopicRegistry registry) throws IOException {
         server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.createContext("/api/topics", exchange -> handleTopics(exchange, registry));
-        server.createContext("/api/dlq", exchange -> respond(exchange, 200, DeadLetterQueue.getEntries()));
-        server.createContext("/api/subscriber-roster", exchange -> respond(exchange, 200, registry.getIdentifiedSubscribersSnapshot()));
+        server.createContext("/api/topics", exchange -> {
+            if (isPreflight(exchange)) return;
+            handleTopics(exchange, registry);
+        });
+        server.createContext("/api/dlq", exchange -> {
+            if (isPreflight(exchange)) return;
+            respond(exchange, 200, DeadLetterQueue.getEntries());
+        });
+        server.createContext("/api/subscriber-roster", exchange -> {
+            if (isPreflight(exchange)) return;
+            respond(exchange, 200, registry.getIdentifiedSubscribersSnapshot());
+        });
         server.setExecutor(Executors.newCachedThreadPool());
+    }
+
+    /**
+     * Handles CORS preflight (OPTIONS) requests so browsers on OTHER machines/ports
+     * (e.g. a teammate's Publisher/Subscriber/Broker UI running on their own laptop,
+     * over a shared hotspot) are allowed to call this API directly, including DELETE
+     * which browsers always preflight. Returns true if it handled the request.
+     */
+    private boolean isPreflight(HttpExchange exchange) throws IOException {
+        if (!"OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+            return false;
+        }
+        exchange.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
+        exchange.getResponseHeaders().add("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS");
+        exchange.getResponseHeaders().add("Access-Control-Allow-Headers", "Content-Type");
+        exchange.sendResponseHeaders(204, -1);
+        exchange.close();
+        return true;
     }
 
     public void start() {
@@ -79,6 +106,8 @@ public class AdminHttpServer {
 
     private void respond(HttpExchange exchange, int status, Object data) throws IOException {
         exchange.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
+        exchange.getResponseHeaders().add("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS");
+        exchange.getResponseHeaders().add("Access-Control-Allow-Headers", "Content-Type");
         exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
 
         byte[] body;
