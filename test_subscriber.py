@@ -13,6 +13,7 @@ Test automat pentru verificarea Subscriber C# (.NET):
 """
 
 import json
+import os
 import queue
 import socket
 import subprocess
@@ -20,6 +21,8 @@ import sys
 import threading
 import time
 from concurrent import futures
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "publisher"))
 
 try:
     import grpc

@@ -64,6 +64,7 @@ message SubRequest {
 
 ### Generare Stub-uri Python (dacă se modifică proto)
 ```bash
+cd publisher
 python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. broker.proto
 ```
 
@@ -71,8 +72,11 @@ python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. broker.proto
 
 ## Ghid de Rulare
 
+Toate comenzile de mai jos se rulează din folderul `publisher/`.
+
 ### Sintaxă generală:
 ```bash
+cd publisher
 python main.py --topic <nume_topic> [--mode {tcp,grpc}] [--host <adresa_ip>] [--port <port>]
 ```
 sau folosind aliasul:

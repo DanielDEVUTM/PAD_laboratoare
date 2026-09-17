@@ -15,7 +15,9 @@ este doar un al patrulea client, folosit exclusiv pentru interfata grafica.
 """
 
 import json
+import os
 import socket
+import sys
 import threading
 import time
 import urllib.error
@@ -26,6 +28,7 @@ from typing import Any, Dict, List
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "publisher"))
 from publisher_client import PublisherClient
 
 BROKER_HOST = "127.0.0.1"
