@@ -42,4 +42,15 @@ public class GrpcConnectionHandler implements ConnectionHandler {
     public StreamObserver<Message> getResponseObserver() {
         return responseObserver;
     }
+
+    @Override
+    public void close() {
+        try {
+            synchronized (responseObserver) {
+                responseObserver.onCompleted();
+            }
+        } catch (Exception ignored) {
+            // stream may already be closed by the client
+        }
+    }
 }

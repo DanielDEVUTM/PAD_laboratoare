@@ -170,4 +170,9 @@ public class ConnectionHandlerImpl implements ConnectionHandler, Runnable {
         } catch (IOException ignored) {
         }
     }
+
+    @Override
+    public void close() {
+        closeQuietly();
+    }
 }

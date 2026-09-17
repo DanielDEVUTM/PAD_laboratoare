@@ -9,13 +9,16 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.concurrent.Executors;
 
 /**
- * Read-only JSON API used by the local web UI to show live broker state
- * (topics, subscriber/backlog counts, DLQ contents). Runs alongside the
- * TCP and gRPC listeners; it never mutates broker state.
+ * JSON API used by the local web UI to show and manage live broker state
+ * (topics, subscriber/backlog counts, DLQ contents). Mutating endpoints
+ * (DELETE) are admin-only actions - deleting a topic disconnects everyone
+ * on it, deleting a named subscriber forgets its identity and backlog.
  */
 public class AdminHttpServer {
     private final HttpServer server;
@@ -23,9 +26,9 @@ public class AdminHttpServer {
 
     public AdminHttpServer(int port, TopicRegistry registry) throws IOException {
         server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.createContext("/api/topics", exchange -> respond(exchange, registry.getTopicsSnapshot()));
-        server.createContext("/api/dlq", exchange -> respond(exchange, DeadLetterQueue.getEntries()));
-        server.createContext("/api/subscriber-roster", exchange -> respond(exchange, registry.getIdentifiedSubscribersSnapshot()));
+        server.createContext("/api/topics", exchange -> handleTopics(exchange, registry));
+        server.createContext("/api/dlq", exchange -> respond(exchange, 200, DeadLetterQueue.getEntries()));
+        server.createContext("/api/subscriber-roster", exchange -> respond(exchange, 200, registry.getIdentifiedSubscribersSnapshot()));
         server.setExecutor(Executors.newCachedThreadPool());
     }
 
@@ -37,18 +40,48 @@ public class AdminHttpServer {
         server.stop(0);
     }
 
-    private void respond(HttpExchange exchange, Object data) throws IOException {
-        exchange.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
-        exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+    /**
+     * Handles everything under /api/topics:
+     *   GET    /api/topics                              -> list all topics
+     *   DELETE /api/topics/{topic}                       -> delete a whole topic
+     *   DELETE /api/topics/{topic}/subscribers/{id}      -> forget one identified subscriber
+     */
+    private void handleTopics(HttpExchange exchange, TopicRegistry registry) throws IOException {
+        String method = exchange.getRequestMethod();
+        String[] parts = exchange.getRequestURI().getPath().split("/");
+        // "/api/topics" -> ["", "api", "topics"]
+        // "/api/topics/sport" -> ["", "api", "topics", "sport"]
+        // "/api/topics/sport/subscribers/S1" -> ["", "api", "topics", "sport", "subscribers", "S1"]
 
-        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-            exchange.sendResponseHeaders(405, -1);
-            exchange.close();
+        if ("GET".equalsIgnoreCase(method) && parts.length == 3) {
+            respond(exchange, 200, registry.getTopicsSnapshot());
             return;
         }
 
+        if ("DELETE".equalsIgnoreCase(method) && parts.length == 4) {
+            String topic = URLDecoder.decode(parts[3], StandardCharsets.UTF_8);
+            registry.removeTopic(topic);
+            respond(exchange, 200, Map.of("status", "ok", "topic", topic));
+            return;
+        }
+
+        if ("DELETE".equalsIgnoreCase(method) && parts.length == 6 && "subscribers".equals(parts[4])) {
+            String topic = URLDecoder.decode(parts[3], StandardCharsets.UTF_8);
+            String subscriberId = URLDecoder.decode(parts[5], StandardCharsets.UTF_8);
+            boolean removed = registry.forgetIdentifiedSubscriber(topic, subscriberId);
+            respond(exchange, removed ? 200 : 404,
+                    Map.of("status", removed ? "ok" : "error", "topic", topic, "subscriberId", subscriberId));
+            return;
+        }
+
+        respond(exchange, 404, Map.of("error", "Rută necunoscută"));
+    }
+
+    private void respond(HttpExchange exchange, int status, Object data) throws IOException {
+        exchange.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
+        exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+
         byte[] body;
-        int status = 200;
         try {
             body = mapper.writeValueAsBytes(data);
         } catch (Exception e) {

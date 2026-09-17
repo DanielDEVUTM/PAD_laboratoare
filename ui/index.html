@@ -104,6 +104,11 @@
   th{color:var(--text-dim); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:.04em;}
   td.num{font-variant-numeric:tabular-nums; text-align:right;}
   td.truncate{max-width:90px; overflow:hidden; text-overflow:ellipsis;}
+  td.action{width:1%; white-space:nowrap; text-align:right;}
+  .row-del{
+    background:transparent; color:var(--err); border:none; font-size:14px; line-height:1;
+    padding:2px 5px; cursor:pointer; font-weight:700;
+  }
   .pill{font-size:10.5px; padding:1px 7px; border-radius:999px; background:var(--panel-2); border:1px solid var(--border);}
   .pill.warn{color:var(--warn); border-color:var(--warn);}
   .pill.ok{color:var(--ok); border-color:var(--ok);}
@@ -227,8 +232,8 @@
         <label>Topicuri active</label>
         <div class="table-scroll">
           <table id="topicsTable">
-            <thead><tr><th>Topic</th><th class="num">Subs</th><th class="num">Backlog</th></tr></thead>
-            <tbody><tr><td colspan="3" class="empty">Niciun topic încă</td></tr></tbody>
+            <thead><tr><th>Topic</th><th class="num">Subs</th><th class="num">Backlog</th><th></th></tr></thead>
+            <tbody><tr><td colspan="4" class="empty">Niciun topic încă</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -236,8 +241,8 @@
         <label style="margin-top:6px;">Subscriberi numiți (persistență)</label>
         <div class="table-scroll">
           <table id="rosterTable">
-            <thead><tr><th>Topic</th><th>Nume</th><th>Status</th><th class="num">În așteptare</th></tr></thead>
-            <tbody><tr><td colspan="4" class="empty">Niciun subscriber numit încă</td></tr></tbody>
+            <thead><tr><th>Topic</th><th>Nume</th><th>Status</th><th class="num">În așteptare</th><th></th></tr></thead>
+            <tbody><tr><td colspan="5" class="empty">Niciun subscriber numit încă</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -479,6 +484,20 @@ async function pollSubscriberMessages(){
   }
 }
 
+async function deleteTopic(topic){
+  if(!confirm(`Ștergi topicul „${topic}” de pe Broker? Toți subscriberii lui (anonimi și numiți) vor fi deconectați, backlog-ul lor se pierde.`)) return;
+  await fetch(`${API}/api/topics/${encodeURIComponent(topic)}`, { method: "DELETE" });
+  pollTopics();
+  pollRoster();
+}
+
+async function deleteRosterSubscriber(topic, subscriberId){
+  if(!confirm(`Uiți subscriberul „${subscriberId}” de pe topicul „${topic}”? Dacă se reconectează cu același nume, va porni de la zero (fără istoric).`)) return;
+  await fetch(`${API}/api/topics/${encodeURIComponent(topic)}/subscribers/${encodeURIComponent(subscriberId)}`, { method: "DELETE" });
+  pollRoster();
+  pollTopics();
+}
+
 async function pollTopics(){
   try{
     const res = await fetch(API + "/api/topics");
@@ -488,11 +507,19 @@ async function pollTopics(){
 
     const tbody = document.querySelector("#topicsTable tbody");
     if(!data.topics || !data.topics.length){
-      tbody.innerHTML = `<tr><td colspan="3" class="empty">Niciun topic încă</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4" class="empty">Niciun topic încă</td></tr>`;
     } else {
       tbody.innerHTML = data.topics.map(t =>
-        `<tr><td>${t.name}</td><td class="num">${t.subscriberCount}</td><td class="num">${t.backlogSize}</td></tr>`
+        `<tr>
+          <td>${t.name}</td>
+          <td class="num">${t.subscriberCount}</td>
+          <td class="num">${t.backlogSize}</td>
+          <td class="action"><button class="row-del" title="Șterge topicul de pe Broker" data-del-topic="${t.name}">🗑</button></td>
+        </tr>`
       ).join("");
+      tbody.querySelectorAll("[data-del-topic]").forEach(btn => {
+        btn.addEventListener("click", () => deleteTopic(btn.dataset.delTopic));
+      });
     }
   } catch(e){
     setStatus(false);
@@ -506,7 +533,7 @@ async function pollRoster(){
 
     const tbody = document.querySelector("#rosterTable tbody");
     if(!data.roster || !data.roster.length){
-      tbody.innerHTML = `<tr><td colspan="4" class="empty">Niciun subscriber numit încă</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="empty">Niciun subscriber numit încă</td></tr>`;
       return;
     }
     tbody.innerHTML = data.roster
@@ -518,8 +545,12 @@ async function pollRoster(){
           <td>${s.subscriberId}</td>
           <td>${s.connected ? '<span class="pill ok">online</span>' : '<span class="pill warn">offline</span>'}</td>
           <td class="num">${s.pendingCount > 0 ? `<span class="pill pending">${s.pendingCount} în așteptare</span>` : '—'}</td>
+          <td class="action"><button class="row-del" title="Uită acest subscriber" data-del-topic="${s.topic}" data-del-id="${s.subscriberId}">🗑</button></td>
         </tr>
       `).join("");
+    tbody.querySelectorAll("[data-del-id]").forEach(btn => {
+      btn.addEventListener("click", () => deleteRosterSubscriber(btn.dataset.delTopic, btn.dataset.delId));
+    });
   } catch(e){ /* silent */ }
 }
 

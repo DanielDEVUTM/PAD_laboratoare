@@ -229,6 +229,64 @@ public class TopicRegistry {
         return result;
     }
 
+    /**
+     * Deletes a topic entirely: disconnects every subscriber (anonymous and
+     * identified) currently on it, and discards its backlog and identity
+     * roster. Publishers connected to it simply keep publishing into a topic
+     * that gets recreated from scratch the moment anyone touches it again.
+     */
+    public void removeTopic(String topic) {
+        if (topic == null) {
+            return;
+        }
+
+        List<ConnectionHandler> anonymousHandlers = subscribers.remove(topic);
+        if (anonymousHandlers != null) {
+            for (ConnectionHandler handler : anonymousHandlers) {
+                handler.close();
+            }
+        }
+        backlogs.remove(topic);
+
+        Map<String, ConnectionHandler> identifiedHandlers = identifiedSubscribers.remove(topic);
+        if (identifiedHandlers != null) {
+            for (ConnectionHandler handler : identifiedHandlers.values()) {
+                handler.close();
+            }
+        }
+        knownSubscriberIds.remove(topic);
+        identifiedBacklogs.remove(topic);
+
+        System.out.println("[TopicRegistry] Topicul '" + topic + "' a fost șters (subscriberi deconectați, backlog golit).");
+    }
+
+    /**
+     * Forgets one identified subscriber on a topic: disconnects it if it's
+     * currently online and discards its pending backlog. If it reconnects
+     * later with the same subscriberId, it starts fresh (no history).
+     */
+    public boolean forgetIdentifiedSubscriber(String topic, String subscriberId) {
+        if (topic == null || subscriberId == null) {
+            return false;
+        }
+
+        Map<String, ConnectionHandler> connected = identifiedSubscribers.get(topic);
+        ConnectionHandler handler = connected != null ? connected.remove(subscriberId) : null;
+        if (handler != null) {
+            handler.close();
+        }
+
+        Set<String> ids = knownSubscriberIds.get(topic);
+        boolean existed = ids != null && ids.remove(subscriberId);
+
+        Map<String, ConcurrentLinkedQueue<Message>> backlogMap = identifiedBacklogs.get(topic);
+        if (backlogMap != null) {
+            backlogMap.remove(subscriberId);
+        }
+
+        return existed || handler != null;
+    }
+
     /** Snapshot of every topic seen so far (has subscribers and/or a pending backlog), for the admin UI. */
     public List<TopicInfo> getTopicsSnapshot() {
         Set<String> names = new TreeSet<>();

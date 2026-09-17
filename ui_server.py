@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from typing import Any, Dict, Optional
@@ -235,6 +236,21 @@ def _admin_get(path: str):
         return [], False
 
 
+def _admin_delete(path: str):
+    url = f"http://{BROKER_HOST}:{BROKER_ADMIN_PORT}{path}"
+    req = urllib.request.Request(url, method="DELETE")
+    try:
+        with urllib.request.urlopen(req, timeout=2.0) as response:
+            return json.loads(response.read().decode("utf-8")), response.status
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read().decode("utf-8")), e.code
+        except Exception:
+            return {"status": "error", "reason": "Raspuns invalid de la Broker"}, e.code
+    except (urllib.error.URLError, TimeoutError, ConnectionError, OSError):
+        return {"status": "error", "reason": "Broker indisponibil (Admin API 5052)"}, 503
+
+
 @app.route("/")
 def index():
     return send_from_directory("ui", "index.html")
@@ -392,6 +408,25 @@ def publish_invalid():
 def topics():
     data, online = _admin_get("/api/topics")
     return jsonify({"topics": data, "brokerOnline": online})
+
+
+@app.route("/api/topics/<topic>", methods=["DELETE"])
+def delete_topic(topic: str):
+    """Deletes a whole topic on the Broker: disconnects every subscriber on
+    it (anonymous and identified) and discards its backlog/roster."""
+    encoded = urllib.parse.quote(topic, safe="")
+    data, status = _admin_delete(f"/api/topics/{encoded}")
+    return jsonify(data), status
+
+
+@app.route("/api/topics/<topic>/subscribers/<subscriber_id>", methods=["DELETE"])
+def delete_topic_subscriber(topic: str, subscriber_id: str):
+    """Forgets one identified subscriber on the Broker: disconnects it if
+    online and discards its personal pending backlog."""
+    encoded_topic = urllib.parse.quote(topic, safe="")
+    encoded_id = urllib.parse.quote(subscriber_id, safe="")
+    data, status = _admin_delete(f"/api/topics/{encoded_topic}/subscribers/{encoded_id}")
+    return jsonify(data), status
 
 
 @app.route("/api/dlq")
