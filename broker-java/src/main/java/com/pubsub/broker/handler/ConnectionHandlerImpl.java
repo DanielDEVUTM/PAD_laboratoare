@@ -73,11 +73,15 @@ public class ConnectionHandlerImpl implements ConnectionHandler, Runnable {
 
             String role = handshakeNode.get("role").asText();
             String topic = handshakeNode.get("topic").asText();
+            String subscriberId = handshakeNode.has("subscriberId") && !handshakeNode.get("subscriberId").isNull()
+                    ? handshakeNode.get("subscriberId").asText()
+                    : null;
 
-            log("Handshake primit: role=" + role + ", topic=" + topic);
+            log("Handshake primit: role=" + role + ", topic=" + topic
+                    + (subscriberId != null ? ", subscriberId=" + subscriberId : ""));
 
             if ("subscriber".equalsIgnoreCase(role)) {
-                handleSubscriber(topic);
+                handleSubscriber(topic, subscriberId);
             } else if ("publisher".equalsIgnoreCase(role)) {
                 handlePublisher(topic);
             } else {
@@ -92,9 +96,15 @@ public class ConnectionHandlerImpl implements ConnectionHandler, Runnable {
         }
     }
 
-    private void handleSubscriber(String topic) throws IOException {
-        topicRegistry.addSubscriber(topic, this);
-        log("Abonat cu succes la topicul: " + topic);
+    private void handleSubscriber(String topic, String subscriberId) throws IOException {
+        boolean identified = subscriberId != null && !subscriberId.isBlank();
+        if (identified) {
+            topicRegistry.addIdentifiedSubscriber(topic, subscriberId, this);
+            log("Abonat identificat cu succes la topicul: " + topic + " (subscriberId=" + subscriberId + ")");
+        } else {
+            topicRegistry.addSubscriber(topic, this);
+            log("Abonat cu succes la topicul: " + topic);
+        }
 
         try {
             // Rămâne blocat citind linii pentru a detecta deconectarea
@@ -105,7 +115,11 @@ public class ConnectionHandlerImpl implements ConnectionHandler, Runnable {
                 }
             }
         } finally {
-            topicRegistry.removeSubscriber(topic, this);
+            if (identified) {
+                topicRegistry.removeIdentifiedSubscriber(topic, subscriberId, this);
+            } else {
+                topicRegistry.removeSubscriber(topic, this);
+            }
             log("Subscriber deconectat de la topicul: " + topic);
             closeQuietly();
         }
@@ -124,7 +138,7 @@ public class ConnectionHandlerImpl implements ConnectionHandler, Runnable {
                     sendRawResponse(JsonUtil.toJson(Map.of("status", "ok")));
                 } catch (InvalidMessageException e) {
                     log("Eroare parsare mesaj publicat: " + e.getMessage());
-                    DeadLetterQueue.addMalformedMessage(line, "Mesaj malformat de la publisher: " + e.getMessage());
+                    DeadLetterQueue.addMalformedMessage(topic, line, "Mesaj malformat de la publisher: " + e.getMessage());
                     sendRawResponse(JsonUtil.toJson(Map.of("status", "error", "reason", e.getMessage())));
                 }
             }

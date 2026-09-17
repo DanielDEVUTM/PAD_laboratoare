@@ -1,5 +1,6 @@
 pubsub\BrokerGrpc$BrokerBaseDescriptorSupplier.class
 pubsub\BrokerGrpc$1.class
+com\pubsub\broker\registry\TopicRegistry$IdentifiedSubscriberInfo.class
 pubsub\BrokerGrpc$3.class
 pubsub\Message$1.class
 com\pubsub\broker\BrokerServer.class

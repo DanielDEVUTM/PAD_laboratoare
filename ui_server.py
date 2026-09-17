@@ -22,8 +22,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections import defaultdict
-from typing import Any, Dict, List
+import uuid
+from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
@@ -35,52 +35,116 @@ BROKER_HOST = "127.0.0.1"
 BROKER_TCP_PORT = 5050
 BROKER_ADMIN_PORT = 5052
 UI_PORT = 8000
-MAX_MESSAGES_PER_TOPIC = 300
+MAX_MESSAGES_PER_SUBSCRIBER = 300
 RECONNECT_DELAYS = (1, 2, 4)
 
 app = Flask(__name__, static_folder="ui", static_url_path="")
 CORS(app)
 
-_feeds_lock = threading.Lock()
-_feeds: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-_feed_counters: Dict[str, int] = defaultdict(int)
-_subscribed_topics: set = set()
+# Each browser-managed subscriber is its own independent TCP connection to
+# the broker, so you can add/remove as many as you want per topic (or spread
+# across topics) to demonstrate broadcast/backlog behaviour.
+_subscribers_lock = threading.Lock()
+_subscribers: Dict[str, Dict[str, Any]] = {}
+
+# Each browser-managed publisher is its own persistent TCP connection (via
+# PublisherClient), so you can run several named publisher instances - possibly
+# on different topics - and remove any one of them independently, same as
+# subscribers. PublisherClient.publish() already reconnects on failure, we
+# just add a lock since Flask serves requests from multiple threads.
+_publishers_lock = threading.Lock()
+_publishers: Dict[str, Dict[str, Any]] = {}
 
 
-def _append_message(topic: str, message: Dict[str, Any]) -> None:
-    with _feeds_lock:
-        _feed_counters[topic] += 1
-        entry = {
-            "index": _feed_counters[topic],
-            "id": message.get("id"),
-            "payload": message.get("payload"),
-            "timestamp": message.get("timestamp"),
-            "receivedAt": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        bucket = _feeds[topic]
-        bucket.append(entry)
-        if len(bucket) > MAX_MESSAGES_PER_TOPIC:
-            del bucket[: len(bucket) - MAX_MESSAGES_PER_TOPIC]
+def _create_subscriber(topic: str, name: Optional[str] = None) -> Dict[str, str]:
+    sub_id = uuid.uuid4().hex[:8]
+    # The subscriberId is what the BROKER uses to recognize "the same subscriber"
+    # across disconnect/reconnect (see TopicRegistry.addIdentifiedSubscriber).
+    # If the user gives it a name, reusing that same name later reconnects as
+    # the same identity and flushes whatever it missed. Without a name, we still
+    # send a (random) id, which is enough for it to have its own personal backlog
+    # for as long as this particular card lives, but a NEW card next time means
+    # a NEW identity - so naming it is what makes "reconnect and catch up" possible.
+    subscriber_id = name.strip() if name and name.strip() else sub_id
+    entry = {
+        "id": sub_id,
+        "topic": topic,
+        "subscriberId": subscriber_id,
+        "status": "connecting",
+        "stop_event": threading.Event(),
+        "socket": None,
+        "feed": [],
+        "counter": 0,
+        "createdAt": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    with _subscribers_lock:
+        _subscribers[sub_id] = entry
+    threading.Thread(target=_subscriber_worker, args=(sub_id,), daemon=True).start()
+    return {"id": sub_id, "subscriberId": subscriber_id}
 
 
-def _subscriber_worker(topic: str) -> None:
-    """Runs forever in background: keeps one live subscriber connection per
-    topic open on behalf of the browser, reconnecting with backoff like the
-    real Subscriber client does."""
+def _remove_subscriber(sub_id: str) -> bool:
+    """Closes the live TCP connection for this specific subscriber instance,
+    so the broker sees it as disconnected (subscriberCount drops for that
+    topic, and future messages for it go into the topic's backlog)."""
+    with _subscribers_lock:
+        entry = _subscribers.pop(sub_id, None)
+    if entry is None:
+        return False
+
+    entry["stop_event"].set()
+    sock = entry.get("socket")
+    if sock is not None:
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
+        try:
+            sock.close()
+        except Exception:
+            pass
+    return True
+
+
+def _subscriber_worker(sub_id: str) -> None:
     buffer = ""
     failed_attempts = 0
+
     while True:
-        sock = None
+        with _subscribers_lock:
+            entry = _subscribers.get(sub_id)
+            if entry is None:
+                return
+            topic = entry["topic"]
+            subscriber_id = entry["subscriberId"]
+            stop_event = entry["stop_event"]
+
+        if stop_event.is_set():
+            return
+
+        sock: Optional[socket.socket] = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5.0)
             sock.connect((BROKER_HOST, BROKER_TCP_PORT))
-            sock.sendall((json.dumps({"role": "subscriber", "topic": topic}) + "\n").encode("utf-8"))
-            sock.settimeout(None)
+            handshake = {"role": "subscriber", "topic": topic, "subscriberId": subscriber_id}
+            sock.sendall((json.dumps(handshake) + "\n").encode("utf-8"))
+            sock.settimeout(1.0)
+
+            with _subscribers_lock:
+                entry = _subscribers.get(sub_id)
+                if entry is None or entry["stop_event"].is_set():
+                    sock.close()
+                    return
+                entry["socket"] = sock
+                entry["status"] = "connected"
             failed_attempts = 0
 
-            while True:
-                chunk = sock.recv(4096)
+            while not stop_event.is_set():
+                try:
+                    chunk = sock.recv(4096)
+                except socket.timeout:
+                    continue
                 if not chunk:
                     raise ConnectionError("Broker a inchis conexiunea")
                 buffer += chunk.decode("utf-8", errors="replace")
@@ -93,29 +157,73 @@ def _subscriber_worker(topic: str) -> None:
                         message = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    _append_message(topic, message)
+                    with _subscribers_lock:
+                        entry = _subscribers.get(sub_id)
+                        if entry is None:
+                            return
+                        entry["counter"] += 1
+                        entry["feed"].append({
+                            "index": entry["counter"],
+                            "id": message.get("id"),
+                            "payload": message.get("payload"),
+                            "timestamp": message.get("timestamp"),
+                            "receivedAt": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        })
+                        if len(entry["feed"]) > MAX_MESSAGES_PER_SUBSCRIBER:
+                            del entry["feed"][: len(entry["feed"]) - MAX_MESSAGES_PER_SUBSCRIBER]
         except Exception:
             pass
         finally:
+            with _subscribers_lock:
+                entry = _subscribers.get(sub_id)
+                if entry is not None:
+                    entry["socket"] = None
+                    if not stop_event.is_set():
+                        entry["status"] = "reconnecting"
             if sock is not None:
                 try:
                     sock.close()
                 except Exception:
                     pass
 
+        if stop_event.is_set():
+            return
+
         delay = RECONNECT_DELAYS[min(failed_attempts, len(RECONNECT_DELAYS) - 1)]
         failed_attempts += 1
-        time.sleep(delay)
+        for _ in range(delay * 10):
+            if stop_event.is_set():
+                return
+            time.sleep(0.1)
 
 
-def _ensure_subscribed(topic: str) -> None:
-    with _feeds_lock:
-        already = topic in _subscribed_topics
-        if not already:
-            _subscribed_topics.add(topic)
-    if not already:
-        thread = threading.Thread(target=_subscriber_worker, args=(topic,), daemon=True)
-        thread.start()
+def _create_publisher(topic: str, name: Optional[str] = None) -> Dict[str, str]:
+    pub_id = uuid.uuid4().hex[:8]
+    display_name = name.strip() if name and name.strip() else pub_id
+    client = PublisherClient(host=BROKER_HOST, port=BROKER_TCP_PORT, topic=topic, timeout=5.0)
+    connected = client.connect(retries=1)
+    entry = {
+        "id": pub_id,
+        "topic": topic,
+        "name": display_name,
+        "client": client,
+        "lock": threading.Lock(),
+        "status": "connected" if connected else "disconnected",
+        "sentCount": 0,
+        "createdAt": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    with _publishers_lock:
+        _publishers[pub_id] = entry
+    return {"id": pub_id, "name": display_name, "status": entry["status"]}
+
+
+def _remove_publisher(pub_id: str) -> bool:
+    with _publishers_lock:
+        entry = _publishers.pop(pub_id, None)
+    if entry is None:
+        return False
+    entry["client"].close()
+    return True
 
 
 def _admin_get(path: str):
@@ -132,46 +240,152 @@ def index():
     return send_from_directory("ui", "index.html")
 
 
-@app.route("/api/publish", methods=["POST"])
-def publish():
+@app.route("/api/publishers", methods=["GET"])
+def list_publishers():
+    with _publishers_lock:
+        result = [
+            {
+                "id": p["id"],
+                "topic": p["topic"],
+                "name": p["name"],
+                "status": p["status"],
+                "sentCount": p["sentCount"],
+                "createdAt": p["createdAt"],
+            }
+            for p in sorted(_publishers.values(), key=lambda p: p["createdAt"])
+        ]
+    return jsonify({"publishers": result})
+
+
+@app.route("/api/publishers", methods=["POST"])
+def add_publisher():
     data = request.get_json(force=True, silent=True) or {}
     topic = (data.get("topic") or "").strip()
-    payload = data.get("payload")
-
+    name = data.get("name")
     if not topic:
         return jsonify({"status": "error", "reason": "Topic lipsa"}), 400
 
-    client = PublisherClient(host=BROKER_HOST, port=BROKER_TCP_PORT, topic=topic, timeout=5.0)
-    if not client.connect(retries=1):
-        return jsonify({"status": "error", "reason": "Broker indisponibil (TCP 5050)"}), 503
+    created = _create_publisher(topic, name)
+    return jsonify({"status": "ok", "id": created["id"], "name": created["name"],
+                     "topic": topic, "connectionStatus": created["status"]})
 
-    ack = client.publish(payload)
-    client.close()
+
+@app.route("/api/publishers/<pub_id>", methods=["DELETE"])
+def remove_publisher_route(pub_id: str):
+    removed = _remove_publisher(pub_id)
+    if not removed:
+        return jsonify({"status": "error", "reason": "Publisher inexistent"}), 404
+    return jsonify({"status": "ok", "id": pub_id})
+
+
+@app.route("/api/publishers/<pub_id>/send", methods=["POST"])
+def publisher_send(pub_id: str):
+    data = request.get_json(force=True, silent=True) or {}
+    payload = data.get("payload")
+
+    with _publishers_lock:
+        entry = _publishers.get(pub_id)
+    if entry is None:
+        return jsonify({"status": "error", "reason": "Publisher inexistent"}), 404
+
+    with entry["lock"]:
+        ack = entry["client"].publish(payload)
+        with _publishers_lock:
+            entry = _publishers.get(pub_id)
+            if entry is not None:
+                entry["status"] = "connected" if ack is not None else "disconnected"
+                if ack is not None:
+                    entry["sentCount"] += 1
 
     if ack is None:
-        return jsonify({"status": "error", "reason": "Nu s-a primit ACK de la Broker"}), 502
+        return jsonify({"status": "error", "reason": "Trimitere eșuată (Broker indisponibil?)"}), 502
     return jsonify(ack)
 
 
-@app.route("/api/subscribe", methods=["POST"])
-def subscribe():
+@app.route("/api/subscribers", methods=["GET"])
+def list_subscribers():
+    with _subscribers_lock:
+        result = [
+            {
+                "id": s["id"],
+                "topic": s["topic"],
+                "subscriberId": s["subscriberId"],
+                "status": s["status"],
+                "messageCount": s["counter"],
+                "createdAt": s["createdAt"],
+            }
+            for s in sorted(_subscribers.values(), key=lambda s: s["createdAt"])
+        ]
+    return jsonify({"subscribers": result})
+
+
+@app.route("/api/subscribers", methods=["POST"])
+def add_subscriber():
+    data = request.get_json(force=True, silent=True) or {}
+    topic = (data.get("topic") or "").strip()
+    name = data.get("name")
+    if not topic:
+        return jsonify({"status": "error", "reason": "Topic lipsa"}), 400
+
+    created = _create_subscriber(topic, name)
+    return jsonify({"status": "ok", "id": created["id"], "subscriberId": created["subscriberId"], "topic": topic})
+
+
+@app.route("/api/subscribers/<sub_id>", methods=["DELETE"])
+def remove_subscriber_route(sub_id: str):
+    removed = _remove_subscriber(sub_id)
+    if not removed:
+        return jsonify({"status": "error", "reason": "Subscriber inexistent"}), 404
+    return jsonify({"status": "ok", "id": sub_id})
+
+
+@app.route("/api/subscribers/<sub_id>/messages")
+def subscriber_messages(sub_id: str):
+    since = request.args.get("since", default=0, type=int)
+    with _subscribers_lock:
+        entry = _subscribers.get(sub_id)
+        if entry is None:
+            return jsonify({"error": "Subscriber inexistent"}), 404
+        new_items = [m for m in entry["feed"] if m["index"] > since]
+        latest = entry["feed"][-1]["index"] if entry["feed"] else since
+        status = entry["status"]
+    return jsonify({"messages": new_items, "latest": latest, "status": status})
+
+
+@app.route("/api/publish-invalid", methods=["POST"])
+def publish_invalid():
+    """Sends a deliberately malformed line on a real publisher TCP connection,
+    so the Dead Letter Queue can be demonstrated straight from the UI without
+    an external script. Mirrors what a corrupted/buggy client would send."""
     data = request.get_json(force=True, silent=True) or {}
     topic = (data.get("topic") or "").strip()
     if not topic:
         return jsonify({"status": "error", "reason": "Topic lipsa"}), 400
 
-    _ensure_subscribed(topic)
-    return jsonify({"status": "ok", "topic": topic})
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(5.0)
+    try:
+        sock.connect((BROKER_HOST, BROKER_TCP_PORT))
+        sock.sendall((json.dumps({"role": "publisher", "topic": topic}) + "\n").encode("utf-8"))
+        sock.sendall(b"acesta nu e JSON valid - mesaj corupt trimis intentionat\n")
 
+        buffer = ""
+        while "\n" not in buffer:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            buffer += chunk.decode("utf-8", errors="replace")
+        line = buffer.split("\n", 1)[0].strip()
+        ack = json.loads(line) if line else {"status": "error", "reason": "Broker nu a raspuns"}
+    except OSError:
+        return jsonify({"status": "error", "reason": "Broker indisponibil (TCP 5050)"}), 503
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
 
-@app.route("/api/messages/<topic>")
-def messages(topic: str):
-    since = request.args.get("since", default=0, type=int)
-    with _feeds_lock:
-        bucket = _feeds.get(topic, [])
-        new_items = [m for m in bucket if m["index"] > since]
-        latest = bucket[-1]["index"] if bucket else since
-    return jsonify({"messages": new_items, "latest": latest})
+    return jsonify(ack)
 
 
 @app.route("/api/topics")
@@ -184,6 +398,12 @@ def topics():
 def dlq():
     data, online = _admin_get("/api/dlq")
     return jsonify({"entries": data, "brokerOnline": online})
+
+
+@app.route("/api/subscriber-roster")
+def subscriber_roster():
+    data, online = _admin_get("/api/subscriber-roster")
+    return jsonify({"roster": data, "brokerOnline": online})
 
 
 if __name__ == "__main__":

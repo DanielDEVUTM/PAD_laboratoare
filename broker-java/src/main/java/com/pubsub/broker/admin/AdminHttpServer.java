@@ -25,6 +25,7 @@ public class AdminHttpServer {
         server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/api/topics", exchange -> respond(exchange, registry.getTopicsSnapshot()));
         server.createContext("/api/dlq", exchange -> respond(exchange, DeadLetterQueue.getEntries()));
+        server.createContext("/api/subscriber-roster", exchange -> respond(exchange, registry.getIdentifiedSubscribersSnapshot()));
         server.setExecutor(Executors.newCachedThreadPool());
     }
 

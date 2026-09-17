@@ -29,9 +29,16 @@ public class DeadLetterQueue {
     }
 
     public static void addMalformedMessage(String rawJson, String reason) {
+        addMalformedMessage("UNKNOWN", rawJson, reason);
+    }
+
+    /** Same as above, but for use when the topic IS already known (e.g. a publisher's
+     * handshake succeeded and only the message body that followed was malformed). */
+    public static void addMalformedMessage(String topic, String rawJson, String reason) {
         String timestamp = LocalDateTime.now().format(FORMATTER);
-        DLQ.add(new DeadLetterEntry(timestamp, "UNKNOWN", rawJson, reason));
-        System.out.println("[" + timestamp + "] [DLQ] Mesaj JSON malformat adăugat în Dead Letter Queue. Motiv: " + reason);
+        String effectiveTopic = (topic == null || topic.isBlank()) ? "UNKNOWN" : topic;
+        DLQ.add(new DeadLetterEntry(timestamp, effectiveTopic, rawJson, reason));
+        System.out.println("[" + timestamp + "] [DLQ] Mesaj JSON malformat adăugat în Dead Letter Queue (topic: " + effectiveTopic + "). Motiv: " + reason);
     }
 
     public static List<DeadLetterEntry> getEntries() {
