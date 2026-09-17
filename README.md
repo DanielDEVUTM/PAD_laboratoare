@@ -96,10 +96,10 @@ python publisher.py --topic stiri --mode tcp
 python publisher.py --topic meteo --mode tcp
 ```
 
-#### Rulare în mod gRPC (port 50051):
+#### Rulare în mod gRPC (port 5051):
 ```bash
 # Terminal 1:
-python publisher.py --topic sport --mode grpc --host 127.0.0.1 --port 50051
+python publisher.py --topic sport --mode grpc --host 127.0.0.1 --port 5051
 
 # Terminal 2:
 python publisher.py --topic stiri --mode grpc
@@ -147,4 +147,38 @@ dotnet run --project subscriber -- --topic sport --mode tcp
 # Terminal 2 (abonat la stiri):
 dotnet run --project subscriber -- --topic stiri --mode tcp
 ```
+
+---
+
+## 6. UI Console (interfață web locală)
+
+Pe lângă cei 3 clienți CLI (Publisher/Broker/Subscriber), există o interfață web locală
+(`ui_server.py` + `ui/index.html`) pentru demo/debugging: publică mesaje pe un topic,
+urmărește live ce se publică pe alt topic, și vezi starea Broker-ului (topicuri active,
+subscriberi, backlog, conținutul Dead Letter Queue).
+
+Interfața **nu înlocuiește** niciun client existent — se comportă ca un al 4-lea client
+care vorbește exact protocolul TCP definit mai sus, plus un mic API de administrare
+adăugat pe Broker (Java) doar pentru citire (nu modifică nimic din logica de rutare).
+
+### Pornire
+
+```bash
+# 1. Pornește Broker-ul (Java) ca de obicei — expune acum și un API admin pe portul 5052
+cd broker-java
+mvn compile exec:java -Dexec.mainClass="com.pubsub.broker.BrokerServer"
+
+# 2. Pornește bridge-ul web (din rădăcina proiectului)
+python ui_server.py
+# deschide http://127.0.0.1:8000 în browser
+```
+
+Necesită `flask` și `flask-cors` (`pip install flask flask-cors`).
+
+### Ce poți face din UI
+- **Publisher** — alegi un topic, scrii un payload (text sau JSON), trimiți; vezi ACK-ul primit.
+- **Live feed** — te „abonezi” dintr-un formular la un topic și vezi mesajele publicate în timp real (polling la 1s).
+- **Broker** — tabel cu topicurile active (nr. subscriberi, mesaje în backlog) și lista Dead Letter Queue, actualizate automat la fiecare 2-2.5s.
+
+Portul admin (5052) e read-only și pornește automat odată cu `BrokerServer`, indiferent de `--mode` (tcp/grpc/both).
 Oprirea se face curat cu `Ctrl+C`, fără a afecta brokerul sau alți clienți.

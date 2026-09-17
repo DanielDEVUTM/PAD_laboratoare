@@ -45,13 +45,13 @@ def parse_arguments() -> argparse.Namespace:
         "--port",
         type=int,
         default=None,
-        help="Portul Broker-ului (implicit: 5050 pentru TCP, 50051 pentru gRPC)."
+        help="Portul Broker-ului (implicit: 5050 pentru TCP, 5051 pentru gRPC)."
     )
     args = parser.parse_args()
 
     # Setare port implicit in functie de mod daca nu este specificat
     if args.port is None:
-        args.port = 5050 if args.mode == "tcp" else 50051
+        args.port = 5050 if args.mode == "tcp" else 5051
 
     return args
 

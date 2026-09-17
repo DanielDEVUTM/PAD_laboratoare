@@ -7,8 +7,11 @@ import com.pubsub.broker.net.ConnectionHandler;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -17,6 +20,8 @@ public class TopicRegistry {
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
     private final Map<String, List<ConnectionHandler>> subscribers = new ConcurrentHashMap<>();
     private final Map<String, ConcurrentLinkedQueue<Message>> backlogs = new ConcurrentHashMap<>();
+
+    public record TopicInfo(String name, int subscriberCount, int backlogSize) {}
 
     private void logTopicState(String topic) {
         String timestamp = LocalDateTime.now().format(FORMATTER);
@@ -98,5 +103,26 @@ public class TopicRegistry {
         }
         List<ConnectionHandler> list = subscribers.get(topic);
         return list != null ? list.size() : 0;
+    }
+
+    public int getBacklogSize(String topic) {
+        if (topic == null) {
+            return 0;
+        }
+        ConcurrentLinkedQueue<Message> backlog = backlogs.get(topic);
+        return backlog != null ? backlog.size() : 0;
+    }
+
+    /** Snapshot of every topic seen so far (has subscribers and/or a pending backlog), for the admin UI. */
+    public List<TopicInfo> getTopicsSnapshot() {
+        Set<String> names = new TreeSet<>();
+        names.addAll(subscribers.keySet());
+        names.addAll(backlogs.keySet());
+
+        List<TopicInfo> snapshot = new ArrayList<>();
+        for (String name : names) {
+            snapshot.add(new TopicInfo(name, getSubscriberCount(name), getBacklogSize(name)));
+        }
+        return snapshot;
     }
 }

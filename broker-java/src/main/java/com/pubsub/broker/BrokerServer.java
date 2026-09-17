@@ -1,5 +1,6 @@
 package com.pubsub.broker;
 
+import com.pubsub.broker.admin.AdminHttpServer;
 import com.pubsub.broker.grpc.GrpcBrokerServiceImpl;
 import com.pubsub.broker.handler.ConnectionHandlerImpl;
 import com.pubsub.broker.registry.TopicRegistry;
@@ -18,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 public class BrokerServer {
     private static final int TCP_PORT = 5050;
     private static final int GRPC_PORT = 5051;
+    private static final int ADMIN_PORT = 5052;
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
 
     private static void log(String msg) {
@@ -72,8 +74,19 @@ public class BrokerServer {
             }
         }
 
+        AdminHttpServer adminServer;
+        try {
+            adminServer = new AdminHttpServer(ADMIN_PORT, registry);
+            adminServer.start();
+            log("Admin HTTP API (UI) pornit pe portul " + ADMIN_PORT);
+        } catch (IOException e) {
+            log("Nu s-a putut porni Admin HTTP API pe portul " + ADMIN_PORT + ": " + e.getMessage());
+            adminServer = null;
+        }
+
         final ServerSocket finalTcpServerSocket = tcpServerSocket;
         final Server finalGrpcServer = grpcServer;
+        final AdminHttpServer finalAdminServer = adminServer;
 
         // Shutdown hook pentru închidere curată la Ctrl+C
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -88,6 +101,10 @@ public class BrokerServer {
 
             if (finalGrpcServer != null) {
                 finalGrpcServer.shutdown();
+            }
+
+            if (finalAdminServer != null) {
+                finalAdminServer.stop();
             }
 
             tcpExecutor.shutdown();
