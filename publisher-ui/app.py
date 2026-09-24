@@ -2,6 +2,11 @@
 publisher-ui/app.py
 Aplicatie INDEPENDENTA pentru rolul de Publisher, cu interfata web proprie.
 
+Fiecare proces = O SINGURA instanta de Publisher. Pentru mai multi publisheri,
+rulezi acest script de mai multe ori (in terminale diferite, eventual pe
+laptopuri diferite) - fiecare proces isi genereaza automat un ID unic si
+isi alege automat un port liber, deci nu se incurca intre ele.
+
 Rulata separat, pe laptopul persoanei responsabile de Publisher, conectata
 la Broker (care poate fi pe alt laptop, pe aceeasi retea/hotspot) prin IP.
 Nu are nicio dependenta de broker-ui/ sau subscriber-ui/ - e o aplicatie
@@ -10,10 +15,15 @@ de sine statatoare, exact cum ar rula pe un calculator diferit.
 Configurare (variabile de mediu, cu valori implicite pentru testare locala):
   BROKER_HOST=192.168.1.23   (IP-ul laptopului cu Broker-ul; implicit 127.0.0.1)
   BROKER_TCP_PORT=5050       (implicit 5050)
-  PUBLISHER_UI_PORT=8001     (implicit 8001)
+  PUBLISHER_UI_PORT=8001     (port de pornit cautarea; daca e ocupat, se alege
+                              automat urmatorul liber - 8002, 8003, ...)
 
-Rulare:
+Rulare (o instanta):
   BROKER_HOST=192.168.1.23 python publisher-ui/app.py
+
+Rulare (mai multe instante, acelasi laptop, terminale diferite):
+  BROKER_HOST=192.168.1.23 python publisher-ui/app.py   # instanta 1 -> 8001
+  BROKER_HOST=192.168.1.23 python publisher-ui/app.py   # instanta 2 -> 8002 (auto)
 """
 
 import json
@@ -33,54 +43,53 @@ from publisher_client import PublisherClient
 
 BROKER_HOST = os.environ.get("BROKER_HOST", "127.0.0.1")
 BROKER_TCP_PORT = int(os.environ.get("BROKER_TCP_PORT", "5050"))
-UI_PORT = int(os.environ.get("PUBLISHER_UI_PORT", "8001"))
+UI_PORT_START = int(os.environ.get("PUBLISHER_UI_PORT", "8001"))
+
+PUBLISHER_ID = uuid.uuid4().hex[:8]
+
+
+def _find_free_port(start_port: int, host: str = "0.0.0.0", max_tries: int = 50) -> int:
+    # Nu folosim SO_REUSEADDR aici: pe Windows, acel flag permite legarea la
+    # un port deja ascultat de alt proces (spre deosebire de Linux), ceea ce
+    # ar face testul sa treaca fals-pozitiv si doua instante ar porni pe
+    # acelasi port.
+    port = start_port
+    for _ in range(max_tries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind((host, port))
+                return port
+            except OSError:
+                port += 1
+    raise RuntimeError(f"Niciun port liber intre {start_port} si {start_port + max_tries - 1}")
+
+
+UI_PORT = _find_free_port(UI_PORT_START)
 
 app = Flask(__name__, static_folder=os.path.dirname(os.path.abspath(__file__)), static_url_path="")
 CORS(app)
 
-_publishers_lock = threading.Lock()
-_publishers: Dict[str, Dict[str, Any]] = {}
+_lock = threading.Lock()
+_instance: Dict[str, Any] = {
+    "topic": None,
+    "name": PUBLISHER_ID,
+    "client": None,
+    "status": "disconnected",
+    "sentCount": 0,
+    "createdAt": None,
+}
 
 
-def _name_taken_on_topic(topic: str, name: str) -> bool:
-    return any(p["topic"] == topic and p["name"] == name for p in _publishers.values())
-
-
-def _create_publisher(topic: str, name: Optional[str] = None) -> Optional[Dict[str, str]]:
-    pub_id = uuid.uuid4().hex[:8]
-    display_name = name.strip() if name and name.strip() else pub_id
-
-    with _publishers_lock:
-        if name and name.strip() and _name_taken_on_topic(topic, display_name):
-            return None
-
-    client = PublisherClient(host=BROKER_HOST, port=BROKER_TCP_PORT, topic=topic, timeout=5.0)
-    connected = client.connect(retries=1)
-    entry = {
-        "id": pub_id,
-        "topic": topic,
-        "name": display_name,
-        "client": client,
-        "lock": threading.Lock(),
-        "status": "connected" if connected else "disconnected",
-        "sentCount": 0,
-        "createdAt": time.strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    with _publishers_lock:
-        if name and name.strip() and _name_taken_on_topic(topic, display_name):
-            client.close()
-            return None
-        _publishers[pub_id] = entry
-    return {"id": pub_id, "name": display_name, "status": entry["status"]}
-
-
-def _remove_publisher(pub_id: str) -> bool:
-    with _publishers_lock:
-        entry = _publishers.pop(pub_id, None)
-    if entry is None:
-        return False
-    entry["client"].close()
-    return True
+def _instance_snapshot() -> Dict[str, Any]:
+    with _lock:
+        return {
+            "id": PUBLISHER_ID,
+            "topic": _instance["topic"],
+            "name": _instance["name"],
+            "status": _instance["status"],
+            "sentCount": _instance["sentCount"],
+            "createdAt": _instance["createdAt"],
+        }
 
 
 @app.route("/")
@@ -90,78 +99,89 @@ def index():
 
 @app.route("/api/config")
 def config():
-    return jsonify({"brokerHost": BROKER_HOST, "brokerTcpPort": BROKER_TCP_PORT})
+    return jsonify({
+        "brokerHost": BROKER_HOST,
+        "brokerTcpPort": BROKER_TCP_PORT,
+        "instanceId": PUBLISHER_ID,
+        "uiPort": UI_PORT,
+    })
 
 
-@app.route("/api/publishers", methods=["GET"])
-def list_publishers():
-    with _publishers_lock:
-        result = [
-            {
-                "id": p["id"], "topic": p["topic"], "name": p["name"],
-                "status": p["status"], "sentCount": p["sentCount"], "createdAt": p["createdAt"],
-            }
-            for p in sorted(_publishers.values(), key=lambda p: p["createdAt"])
-        ]
-    return jsonify({"publishers": result})
+@app.route("/api/instance", methods=["GET"])
+def get_instance():
+    return jsonify(_instance_snapshot())
 
 
-@app.route("/api/publishers", methods=["POST"])
-def add_publisher():
+@app.route("/api/connect", methods=["POST"])
+def connect():
     data = request.get_json(force=True, silent=True) or {}
     topic = (data.get("topic") or "").strip()
     name = data.get("name")
     if not topic:
         return jsonify({"status": "error", "reason": "Topic lipsa"}), 400
 
-    created = _create_publisher(topic, name)
-    if created is None:
-        return jsonify({"status": "error",
-                         "reason": f"Există deja un publisher numit „{name.strip()}” pe topicul „{topic}”"}), 409
-    return jsonify({"status": "ok", "id": created["id"], "name": created["name"],
-                     "topic": topic, "connectionStatus": created["status"]})
+    with _lock:
+        old_client = _instance["client"]
+
+    if old_client is not None:
+        old_client.close()
+
+    display_name = name.strip() if name and name.strip() else PUBLISHER_ID
+    client = PublisherClient(host=BROKER_HOST, port=BROKER_TCP_PORT, topic=topic, timeout=5.0)
+    connected = client.connect(retries=1)
+
+    with _lock:
+        _instance["topic"] = topic
+        _instance["name"] = display_name
+        _instance["client"] = client
+        _instance["status"] = "connected" if connected else "disconnected"
+        _instance["sentCount"] = 0
+        _instance["createdAt"] = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    return jsonify(_instance_snapshot())
 
 
-@app.route("/api/publishers/<pub_id>", methods=["DELETE"])
-def remove_publisher_route(pub_id: str):
-    removed = _remove_publisher(pub_id)
-    if not removed:
-        return jsonify({"status": "error", "reason": "Publisher inexistent"}), 404
-    return jsonify({"status": "ok", "id": pub_id})
+@app.route("/api/disconnect", methods=["POST"])
+def disconnect():
+    with _lock:
+        client = _instance["client"]
+        _instance["client"] = None
+        _instance["topic"] = None
+        _instance["status"] = "disconnected"
+    if client is not None:
+        client.close()
+    return jsonify(_instance_snapshot())
 
 
-@app.route("/api/publishers/<pub_id>/send", methods=["POST"])
-def publisher_send(pub_id: str):
+@app.route("/api/send", methods=["POST"])
+def send():
     data = request.get_json(force=True, silent=True) or {}
     payload = data.get("payload")
 
-    with _publishers_lock:
-        entry = _publishers.get(pub_id)
-    if entry is None:
-        return jsonify({"status": "error", "reason": "Publisher inexistent"}), 404
+    with _lock:
+        client = _instance["client"]
+    if client is None:
+        return jsonify({"status": "error", "reason": "Publisher neconectat la niciun topic"}), 409
 
-    with entry["lock"]:
-        ack = entry["client"].publish(payload)
-        with _publishers_lock:
-            entry = _publishers.get(pub_id)
-            if entry is not None:
-                entry["status"] = "connected" if ack is not None else "disconnected"
-                if ack is not None:
-                    entry["sentCount"] += 1
+    ack = client.publish(payload)
+    with _lock:
+        _instance["status"] = "connected" if ack is not None else "disconnected"
+        if ack is not None:
+            _instance["sentCount"] += 1
 
     if ack is None:
-        return jsonify({"status": "error", "reason": "Trimitere eșuată (Broker indisponibil?)"}), 502
+        return jsonify({"status": "error", "reason": "Trimitere esuata (Broker indisponibil?)"}), 502
     return jsonify(ack)
 
 
 @app.route("/api/publish-invalid", methods=["POST"])
 def publish_invalid():
-    """Trimite intentionat o linie corupta pe o conexiune reala de publisher,
-    ca sa poti demonstra Dead Letter Queue-ul direct din UI."""
-    data = request.get_json(force=True, silent=True) or {}
-    topic = (data.get("topic") or "").strip()
+    """Trimite intentionat o linie corupta pe topicul curent al acestei
+    instante, ca sa poti demonstra Dead Letter Queue-ul direct din UI."""
+    with _lock:
+        topic = _instance["topic"]
     if not topic:
-        return jsonify({"status": "error", "reason": "Topic lipsa"}), 400
+        return jsonify({"status": "error", "reason": "Publisher neconectat la niciun topic"}), 409
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(5.0)
@@ -190,5 +210,5 @@ def publish_invalid():
 
 
 if __name__ == "__main__":
-    print(f"Publisher UI pornit pe http://0.0.0.0:{UI_PORT}  (Broker tinta: {BROKER_HOST}:{BROKER_TCP_PORT})")
+    print(f"Publisher UI [{PUBLISHER_ID}] pornit pe http://0.0.0.0:{UI_PORT}  (Broker tinta: {BROKER_HOST}:{BROKER_TCP_PORT})")
     app.run(host="0.0.0.0", port=UI_PORT, debug=False, threaded=True)
