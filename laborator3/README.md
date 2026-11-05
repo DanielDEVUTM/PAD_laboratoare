@@ -58,6 +58,8 @@ Câmpuri: `id, firstName*, lastName*, email*, department, position, salary, hire
 
 Management (prin gateway, servit de orchestrator): `GET /warehouses`, `POST /warehouses {name?, count?}`, `DELETE /warehouses/{name}`, `PUT /warehouses/{name}/api|db {"state":"running|stopped|frozen"}`.
 
+**Acces direct la un singur API (pentru teste):** `/nodes/{warehouse}/...`, de exemplu `GET http://localhost:8000/nodes/wh-1/employees/1` sau `POST /nodes/wh-1/employees`. Cererea ajunge exact la acel nod (fără round-robin, fără cache); `X-Served-By` confirmă nodul. Datele scrise acolo se propagă prin `sync` în toate warehouse-urile.
+
 Endpoint-uri ale gateway-ului: `GET /registry/instances`, `POST /registry/instances`, `DELETE /registry/instances/{id}`,
 `GET /admin/state`, `GET /admin/events`, `GET /admin/instances/{id}/employees|db` (conținutul unei baze anume, ocolind balansarea),
 `POST /admin/priority-tests`.

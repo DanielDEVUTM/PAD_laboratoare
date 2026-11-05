@@ -316,6 +316,242 @@
       ]
     },
     {
+      "name": "Direct to ONE warehouse API (wh-1)",
+      "description": "No round-robin, no cache: the request goes exactly to that node (X-Served-By confirms it). Replace wh-1 with wh-2, wh-3...",
+      "item": [
+        {
+          "name": "wh-1: list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/nodes/wh-1/employees?limit=5",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "nodes",
+                "wh-1",
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "wh-1: get one",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/nodes/wh-1/employees/1",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "nodes",
+                "wh-1",
+                "employees",
+                "1"
+              ]
+            }
+          }
+        },
+        {
+          "name": "wh-1: create (POST)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/nodes/wh-1/employees",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "nodes",
+                "wh-1",
+                "employees"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Direct\",\n  \"lastName\": \"Wh1\",\n  \"email\": \"direct@wh1.test\"\n}"
+            }
+          }
+        },
+        {
+          "name": "wh-1: replace (PUT)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/nodes/wh-1/employees/direct-1",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "nodes",
+                "wh-1",
+                "employees",
+                "direct-1"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Direct\",\n  \"lastName\": \"Wh1\",\n  \"email\": \"direct@wh1.test\"\n}"
+            }
+          }
+        },
+        {
+          "name": "wh-1: delete",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/nodes/wh-1/employees/direct-1",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "nodes",
+                "wh-1",
+                "employees",
+                "direct-1"
+              ]
+            }
+          }
+        },
+        {
+          "name": "wh-1: as XML",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/nodes/wh-1/employees?limit=3&format=xml",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "nodes",
+                "wh-1",
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "3"
+                },
+                {
+                  "key": "format",
+                  "value": "xml"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "wh-1: health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/nodes/wh-1/health",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "nodes",
+                "wh-1",
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "wh-1: database / replica set",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/nodes/wh-1/admin/db",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "nodes",
+                "wh-1",
+                "admin",
+                "db"
+              ]
+            }
+          }
+        },
+        {
+          "name": "wh-2: list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/nodes/wh-2/employees?limit=5",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "nodes",
+                "wh-2",
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "wh-3: list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/nodes/wh-3/employees?limit=5",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "nodes",
+                "wh-3",
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "CRUD (JSON)",
       "item": [
         {
