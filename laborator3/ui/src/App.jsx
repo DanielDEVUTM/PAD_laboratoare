@@ -11,6 +11,7 @@ import WarehousePanel from './components/WarehousePanel.jsx'
 export default function App() {
   const [state, setState] = useState(null)
   const [events, setEvents] = useState([])
+  const [sync, setSync] = useState([])
   const [error, setError] = useState(false)
   const [response, setResponse] = useState(null)
   const [tick, setTick] = useState(0)
@@ -19,6 +20,7 @@ export default function App() {
     try {
       const [s, e] = await Promise.all([getJson('/admin/state'), getJson('/admin/events')])
       setState(s); setEvents(e); setError(false)
+      try { setSync(await getJson('/sync/warehouses')) } catch { setSync([]) }
     } catch {
       setError(true)
     }
@@ -43,7 +45,7 @@ export default function App() {
       </header>
 
       <div className="grid gap-4">
-        <WarehousePanel tick={tick} />
+        <WarehousePanel tick={tick} sync={sync} />
         <ClusterPanel state={state} error={error} />
         <div className="grid gap-4 lg:grid-cols-2">
           <DatabasePanel instances={state?.instances ?? []} tick={tick} />

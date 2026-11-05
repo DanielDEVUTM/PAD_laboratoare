@@ -6,7 +6,7 @@ import { getJson } from '../api.js'
 export default function DatabasePanel({ instances, tick }) {
   const [selected, setSelected] = useState(null)
   const [rows, setRows] = useState({})
-  const [db, setDb] = useState(null)
+  const [dbs, setDbs] = useState({})
 
   const up = instances.filter((i) => i.status === 'UP')
   const active = selected && instances.find((i) => i.id === selected) ? selected : instances[0]?.id
@@ -24,14 +24,11 @@ export default function DatabasePanel({ instances, tick }) {
           }
         }),
       )
-      let dbInfo = null
-      for (const i of up) {
-        try {
-          dbInfo = await getJson(`/admin/instances/${i.id}/db`)
-          if (dbInfo.members) break
-        } catch { /* try next node */ }
-      }
-      if (!cancelled) { setRows(result); setDb(dbInfo) }
+      const dbInfo = {}
+      await Promise.all(up.map(async (i) => {
+        try { dbInfo[i.id] = await getJson(`/admin/instances/${i.id}/db`) } catch { /* unreachable */ }
+      }))
+      if (!cancelled) { setRows(result); setDbs(dbInfo) }
     })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -40,12 +37,13 @@ export default function DatabasePanel({ instances, tick }) {
   const counts = instances.map((i) => rows[i.id]?.total)
   const inSync = counts.length > 0 && counts.every((c) => c !== undefined && c === counts[0])
   const page = rows[active]
+  const db = dbs[active]
 
   const roleTone = (s) => (s === 'PRIMARY' ? 'green' : s === 'SECONDARY' ? 'blue' : 'red')
 
   return (
     <Card
-      title="Databases (MongoDB replica set)"
+      title="Databases — what each warehouse really contains"
       right={
         instances.length > 0 &&
         (inSync ? <Badge tone="green">all nodes in sync · {counts[0]} docs</Badge> : <Badge tone="amber">nodes differ {counts.join(' / ')}</Badge>)
@@ -58,6 +56,7 @@ export default function DatabasePanel({ instances, tick }) {
             <Badge tone={roleTone(m.state)}>{m.state.startsWith('(') ? 'DOWN' : m.state}</Badge>
           </div>
         ))}
+        {db?.replicaSet && <span className="self-center text-xs text-slate-500">replica set <b className="text-slate-300">{db.replicaSet}</b> of warehouse {active}</span>}
         {!db?.members && <span className="text-xs text-slate-500">replica-set status unavailable</span>}
       </div>
 
