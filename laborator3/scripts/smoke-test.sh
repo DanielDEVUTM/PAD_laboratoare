@@ -55,34 +55,51 @@ over=$(echo "$res" | json "d['normalRequests']-(d['highFinishedPosition']-1)")
 hi=$(echo "$res" | json "d['highFinishedAfterMs']"); last=$(echo "$res" | json "d['lastNormalFinishedAfterMs']")
 [ "$over" -ge 5 ] && [ "$hi" -lt "$last" ] && ok "HIGH overtook $over queued requests (HIGH ${hi} ms vs last normal ${last} ms)" || ko "priority not respected: $res"
 
+echo "== dynamic warehouses (create / sync / remove through the gateway)"
+before=$(curl -s $G/registry/instances | json "len(d)")
+check "POST /warehouses -> 202" "$(code -X POST $G/warehouses -H 'Content-Type: application/json' -d '{"name":"smoke-wh"}')" 202
+for i in $(seq 1 40); do sleep 3; st=$(curl -s $G/registry/instances | json "[i['status'] for i in d if i['id']=='smoke-wh']"); [ "$st" = "['UP']" ] && break; done
+check "new warehouse registered itself in the gateway" "$st" "['UP']"
+sleep 2
+check "new database was synchronised (same document count)" "$(curl -s "$G/admin/instances/smoke-wh/employees?limit=1" | json "d['total']")" "$(curl -s -H 'Cache-Control: no-cache' "$G/employees?limit=1" | json "d['total']")"
+check "DELETE /warehouses/smoke-wh -> 202" "$(code -X DELETE $G/warehouses/smoke-wh)" 202
+sleep 15
+after=$(curl -s $G/registry/instances | json "len(d)")
+check "warehouse removed (instances back to $before)" "$after" "$before"
+check "its containers are gone" "$(docker ps -a --format '{{.Names}}' | grep -c '^smoke-wh')" 0
+
 if [ "${1:-}" = "--chaos" ]; then
-  echo "== circuit breaker + retry (docker pause = node accepts the connection but never answers)"
-  docker compose pause dw-2 >/dev/null
+  W=$(curl -s $G/registry/instances | json "sorted(i['id'] for i in d)[1]")   # an arbitrary warehouse
+  echo "== circuit breaker + retry (docker pause = node accepts the connection but never answers): $W-api"
+  docker pause "$W-api" >/dev/null
   curl -s -o /dev/null -H 'Cache-Control: no-cache' $G/employees/1
   for i in 1 2 3 4 5 6; do curl -s -o /dev/null -H 'Cache-Control: no-cache' $G/employees/1; done
-  br=$(curl -s $G/registry/instances | json "[i['breaker']+'/'+i['status'] for i in d if i['id']=='dw-2'][0]")
-  case "$br" in OPEN/*|*/DOWN) ok "dw-2 cut off from rotation ($br)";; *) ko "dw-2 still in rotation ($br)";; esac
+  br=$(curl -s $G/registry/instances | json "[i['breaker']+'/'+i['status'] for i in d if i['id']=='$W'][0]")
+  case "$br" in OPEN/*|*/DOWN) ok "$W cut off from rotation ($br)";; *) ko "$W still in rotation ($br)";; esac
   c=$(for i in 1 2 3 4 5 6; do code -H 'Cache-Control: no-cache' $G/employees/1; echo; done | sort -u | grep .)
-  check "clients still get 200 while dw-2 is frozen" "$c" 200
-  docker compose unpause dw-2 >/dev/null
+  check "clients still get 200 while $W is frozen" "$c" 200
+  docker unpause "$W-api" >/dev/null
 
-  echo "== health check / service discovery (stop a node)"
-  docker compose stop dw-3 >/dev/null; sleep 3
-  st=$(curl -s $G/registry/instances | json "[i['id'] for i in d if i['id']=='dw-3']")
-  [ "$st" = "[]" ] && ok "stopped node removed from the registry" || ko "dw-3 still registered: $st"
-  docker compose start dw-3 >/dev/null; sleep 20
-  st=$(curl -s $G/registry/instances | json "[i['status'] for i in d if i['id']=='dw-3']")
+  echo "== health check / service discovery (stop a node via the orchestrator)"
+  check "PUT /warehouses/$W/api stopped" "$(code -X PUT $G/warehouses/$W/api -H 'Content-Type: application/json' -d '{"state":"stopped"}')" 200
+  sleep 3
+  st=$(curl -s $G/registry/instances | json "[i['id'] for i in d if i['id']=='$W']")
+  [ "$st" = "[]" ] && ok "stopped node removed from the registry" || ko "$W still registered: $st"
+  code -X PUT $G/warehouses/$W/api -H 'Content-Type: application/json' -d '{"state":"running"}' >/dev/null; sleep 20
+  st=$(curl -s $G/registry/instances | json "[i['status'] for i in d if i['id']=='$W']")
   check "restarted node re-registers by itself" "$st" "['UP']"
 
   echo "== master election (stop the MongoDB primary)"
-  primary=$(docker compose exec -T mongo1 mongosh --quiet --eval 'db.hello().primary' 2>/dev/null | tr -d '\r'); svc=${primary%%:*}
-  [ -z "$svc" ] && { svc=mongo2; primary=$(docker compose exec -T mongo2 mongosh --quiet --eval 'db.hello().primary' | tr -d '\r'); svc=${primary%%:*}; }
-  docker compose stop "$svc" >/dev/null; sleep 12
+  N=$(curl -s $G/registry/instances | json "d[0]['id']")
+  primary=$(curl -s -H 'Cache-Control: no-cache' "$G/admin/instances/$N/db" | json "[m['name'] for m in d['members'] if m['state']=='PRIMARY'][0]"); pw=${primary%%-db:*}
+  # use a node that is NOT attached to the primary's warehouse for the checks
+  docker stop "$pw-db" >/dev/null; sleep 12
   c=$(code -X PUT $G/employees/election -H 'Content-Type: application/json' -d '{"firstName":"E","lastName":"L","email":"e@l.test"}')
-  case "$c" in 200|201) ok "write succeeds after the primary ($svc) died (HTTP $c)";; *) ko "write failed after primary died (HTTP $c)";; esac
-  newp=$(docker compose exec -T $([ "$svc" = mongo1 ] && echo mongo2 || echo mongo1) mongosh --quiet --eval 'db.hello().primary' | tr -d '\r')
+  case "$c" in 200|201) ok "write succeeds after the primary ($pw-db) died (HTTP $c)";; *) ko "write failed after primary died (HTTP $c)";; esac
+  other=$(curl -s $G/registry/instances | json "[i['id'] for i in d if i['id']!='$pw'][0]")
+  newp=$(curl -s -H 'Cache-Control: no-cache' "$G/admin/instances/$other/db" | json "[m['name'] for m in d['members'] if m['state']=='PRIMARY'][0]")
   [ -n "$newp" ] && [ "$newp" != "$primary" ] && ok "new primary elected: $newp (was $primary)" || ko "no new primary ($newp)"
-  docker compose start "$svc" >/dev/null; sleep 10
+  docker start "$pw-db" >/dev/null; sleep 10
   curl -s -o /dev/null -X DELETE $G/employees/election
 fi
 

@@ -12,6 +12,254 @@
   ],
   "item": [
     {
+      "name": "Warehouses (dynamic)",
+      "item": [
+        {
+          "name": "List warehouses",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/warehouses",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "warehouses"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create 1 warehouse (auto name)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/warehouses",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "warehouses"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"count\":1}"
+            }
+          }
+        },
+        {
+          "name": "Create 3 warehouses",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/warehouses",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "warehouses"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"count\":3}"
+            }
+          }
+        },
+        {
+          "name": "Create warehouse with a name",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/warehouses",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "warehouses"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\":\"paris\"}"
+            }
+          }
+        },
+        {
+          "name": "Remove warehouse",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/warehouses/paris",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "warehouses",
+                "paris"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Freeze API of wh-1 (circuit breaker demo)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/warehouses/wh-1/api",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "warehouses",
+                "wh-1",
+                "api"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"state\":\"frozen\"}"
+            }
+          }
+        },
+        {
+          "name": "Stop API of wh-1",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/warehouses/wh-1/api",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "warehouses",
+                "wh-1",
+                "api"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"state\":\"stopped\"}"
+            }
+          }
+        },
+        {
+          "name": "Start API of wh-1",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/warehouses/wh-1/api",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "warehouses",
+                "wh-1",
+                "api"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"state\":\"running\"}"
+            }
+          }
+        },
+        {
+          "name": "Stop database of wh-1 (master election demo)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/warehouses/wh-1/db",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "warehouses",
+                "wh-1",
+                "db"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"state\":\"stopped\"}"
+            }
+          }
+        },
+        {
+          "name": "Start database of wh-1",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/warehouses/wh-1/db",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "warehouses",
+                "wh-1",
+                "db"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"state\":\"running\"}"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "CRUD (JSON)",
       "item": [
         {
