@@ -37,7 +37,9 @@ public class ProxyController {
             if (v != null) headers.put(name, v);
         }
         byte[] body = request.getInputStream().readAllBytes();
-        ProxyService.ProxyResponse r = proxy.forward(new ProxyService.ProxyRequest(request.getMethod(), pathAndQuery, headers, body));
+        ProxyService.ProxyResponse r = proxy.forward(new ProxyService.ProxyRequest(request.getMethod(), pathAndQuery, headers, body,
+                Priority.parse(request.getHeader("X-Priority")),
+                String.valueOf(request.getHeader("Cache-Control")).toLowerCase().contains("no-cache")));
         HttpHeaders out = new HttpHeaders();
         r.headers().forEach(out::set);
         return new ResponseEntity<>(r.body(), out, r.status());

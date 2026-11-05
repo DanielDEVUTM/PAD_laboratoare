@@ -21,9 +21,14 @@ public class AdminController {
     private final HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(1)).build();
 
-    public AdminController(InstanceRegistry registry, EventLog events) {
+    private final CacheService cache;
+    private final PriorityExecutor executor;
+
+    public AdminController(InstanceRegistry registry, EventLog events, CacheService cache, PriorityExecutor executor) {
         this.registry = registry;
         this.events = events;
+        this.cache = cache;
+        this.executor = executor;
     }
 
     @GetMapping("/health")
@@ -35,6 +40,8 @@ public class AdminController {
     public Map<String, Object> state() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("instances", registry.all().stream().map(Instance::view).toList());
+        m.put("cache", cache.stats());
+        m.put("queue", executor.stats());
         return m;
     }
 
