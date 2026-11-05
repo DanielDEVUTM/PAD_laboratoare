@@ -4,21 +4,23 @@ Realizarea transparenței în distribuire: clientul (Postman sau UI) vorbește *
 (`http://localhost:8000`) și nu știe câte noduri Data Warehouse există, unde rulează sau ce port au.
 
 ```
-                         ┌───────────── gateway :8000 ─────────────┐
- Postman / UI  ───HTTP──▶│ service discovery · health check        │──▶ wh-1-api ┐
-                         │ round-robin · prioritate · cache        │──▶ wh-2-api ├─▶ MongoDB replica set
-                         │ circuit breaker + retry                 │──▶ …-api    ┘   wh-1-db · wh-2-db · …
-                         └───────┬──────────────────┬──────────────┘
-                                 │                  └──▶ Redis (cache)
-                                 └──▶ orchestrator ──(docker.sock)──▶ creează / șterge warehouse-uri
+                         ┌───────────── gateway :8000 ─────────────┐        ┌─ wh-1-db-1  PRIMARY
+ Postman / UI  ───HTTP──▶│ service discovery · health check        │──▶ wh-1-api ─┼─ wh-1-db-2  SECONDARY   replica set rs-wh-1  ("1 + 2")
+                         │ round-robin · prioritate · cache        │        └─ wh-1-db-3  SECONDARY
+                         │ circuit breaker + retry                 │──▶ wh-2-api ──▶ wh-2-db-1/2/3   (propriul replica set)
+                         └───────┬─────────────────┬───────────────┘──▶ …-api    ──▶ …-db-1/2/3
+                                 │                 └──▶ Redis (cache)
+                                 ├──▶ orchestrator ──(docker.sock)──▶ creează / șterge warehouse-uri
+                                 └──▶ sync ── change streams ──▶ aceleași date în TOATE warehouse-urile
 ```
 
-Un **warehouse** = un API (`<nume>-api`) + propria lui bază de date MongoDB (`<nume>-db`). Numărul lor **nu este scris nicăieri**:
+Un **warehouse** = un API (`<nume>-api`) + propria lui bază de date, care este un **replica set de 3 membri** (`<nume>-db-1/2/3`): **1 primary + 2 secondary** („1 + 2”). Numărul lor **nu este scris nicăieri**:
 se creează și se șterg la runtime din UI (sau din Postman), oricâte dorești.
 
 | Componentă | Tehnologie | Rol |
 |---|---|---|
 | `dw-node/` | Java 21, Spring Boot | API REST (CRUD complet) peste MongoDB; se înregistrează singur în gateway |
+| `sync/` | Java 21, MongoDB change streams | microserviciul de **sincronizare**: aceleași date în toate warehouse-urile |
 | `orchestrator/` | Java 21, Docker Engine API | creează/șterge/oprește dinamic warehouse-uri (API + DB), comandat prin gateway |
 | `gateway/` | Java 21, Spring Boot | proxy transparent: discovery, health check, round-robin, cache, prioritate, circuit breaker |
 | `ui/` | React + Tailwind (Vite) | vezi ce conțin bazele de date, rulezi CRUD, urmărești gateway-ul |
@@ -75,12 +77,10 @@ când reapare (health OK sau heartbeat nou) intră singur înapoi. Un nod `DOWN`
 
 **Round-robin.** Cererile merg pe rând la nodurile disponibile (`InstanceRegistry.pick`). Răspunsul conține `X-Served-By`.
 
-**Sincronizarea bazelor.** Fiecare warehouse are baza lui, iar toate bazele formează un MongoDB replica set: replicarea e încorporată, doar o configurăm.
-La crearea unui warehouse, orchestratorul pornește un MongoDB nou, îl adaugă în replica set (`rs.add`) și MongoDB îi copiază singur toate datele (initial sync);
-la ștergere face `rs.remove`. Primul warehouse inițializează replica set-ul și rulează scriptul de populare (`infra/seed.js`). Peste 7 membri, cei noi intră fără drept de vot (limită MongoDB).
-Scrierile se confirmă cu `w=majority` (mai lente), citirile se fac de pe secundari (`readPreference=secondaryPreferred`, mai rapide):
-exact compromisul „scrieri mai lente, citiri mai rapide” din curs. În UI, panoul „Databases” arată conținutul fiecărui nod
-și dacă toate sunt sincronizate.
+**Sincronizarea bazelor (două niveluri).**
+1. *În interiorul unui warehouse* — replica set-ul propriu de 3 baze: replicarea e încorporată în MongoDB, noi doar o configurăm (`rs.initiate`). Scrierile se confirmă cu `w=majority` (mai lente), citirile se fac de pe secundari (`readPreference=secondaryPreferred`, mai rapide): „scrieri mai lente, citiri mai rapide”.
+2. *Între warehouse-uri* — microserviciul `sync/` (cel de care vorbea profesorul). Ascultă **change stream-ul** fiecărui warehouse și aplică orice insert/update/delete în toate celelalte (last-writer-wins pe `updatedAt`; aplicarea unui document identic nu produce eveniment, deci nu apar bucle). Un warehouse nou e mai întâi sincronizat (copie completă în ambele sensuri) și **abia apoi** orchestratorul îi pornește API-ul. Modificările care nu pot fi aplicate (baza țintă e căzută) stau într-o coadă în ordine și se reiau automat.
+Primul warehouse al unui cluster gol rulează scriptul de populare (`infra/seed.js`); celelalte primesc datele prin sync. Starea sincronizării: `GET /sync/warehouses` (și în UI).
 
 **Cache (Redis).** Doar `GET` cu 200, TTL 30 s, cheie = URL + `Accept`. Orice scriere reușită incrementează o versiune globală
 inclusă în chei → tot cache-ul vechi devine inaccesibil imediat. O mică „fereastră de gardă” (1,5 s) după scriere împiedică
@@ -101,9 +101,7 @@ dacă reușește → `CLOSED`. Un răspuns HTTP 502/503/504 de la nod declanșea
 Gateway-ul adaugă `X-Request-Id` și nodul îl folosește ca id la `POST` fără id → un `POST` retrimis nu creează duplicate.
 Demo: *Freeze* pe API-ul unui warehouse (= `docker pause`; nodul acceptă conexiunea și nu răspunde niciodată) sau header `X-Simulate-Delay-Ms: 3000`.
 
-**Bonus 5 — Alegerea unui master.** Replica set-ul are un PRIMARY și restul SECONDARY. Dacă primarul cade,
-ceilalți aleg automat un nou primar în câteva secunde, iar scrierile continuă. Demo: în UI, la warehouse-ul al cărui DB e PRIMARY (panoul „Databases”) apeși *Stop* pe DB și urmărești panoul. *Notă de proiectare:* cele 3 baze sunt membri ai aceluiași replica set (nu 3 baze
-independente cu sincronizare scrisă de noi); așa sincronizarea și alegerea masterului sunt cele încorporate în MongoDB.
+**Bonus 5 — structura „1 + 2” și alegerea unui master.** Fiecare warehouse are **o bază care vine cu încă 2 baze**: un replica set de 3 membri (`wh-1-db-1/2/3`), 1 PRIMARY + 2 SECONDARY. Dacă primarul cade, **ceilalți doi aleg un nou master** în câteva secunde (vot majoritar: 2 din 3), iar scrierile continuă fără pierderi. Demo: în UI, la un warehouse apeși *Stop* pe membrul marcat PRIMARY; apare alt PRIMARY, API-ul merge în continuare, iar datele ajung tot în toate warehouse-urile. (Dacă pică *toate* cele 3 baze ale unui warehouse, modificările pentru el așteaptă în coada sync și se aplică la revenire.)
 
 > **De ce nu Firebase?** E serviciu cloud gestionat: nu poți rula 3 replici proprii, nu poți opri „primarul” ca să demonstrezi
 > alegerea masterului, cere cont și internet, iar sincronizarea nu e configurabilă de noi. MongoDB (document NoSQL) acoperă
@@ -111,7 +109,7 @@ independente cu sincronizare scrisă de noi); așa sincronizarea și alegerea ma
 
 ## Docker și Kubernetes (pentru explicație la apărare)
 
-> **Limitare importantă:** crearea dinamică din UI (orchestrator) este implementată doar pentru **Docker/Compose** și testată acolo.
+> **Limitare importantă:** crearea dinamică din UI (orchestrator + sync + structura „1 + 2” pe warehouse) este implementată doar pentru **Docker/Compose** și testată acolo. Manifestele `k8s/` descriu varianta *veche, statică* (un singur replica set de 3 Mongo partajat de toate API-urile, fără serviciul `sync`) și **nu au fost actualizate la „1 + 2”**.
 > Manifestele `k8s/` sunt statice (3 Mongo + 3 API la start); scalarea API-urilor merge dinamic cu `kubectl scale deploy/dw` (se înregistrează singure),
 > dar adăugarea unui membru Mongo nou nu e automată (trebuie `kubectl scale sts/mongo` + `rs.add(...)`). Un backend Kubernetes pentru orchestrator nu a fost scris.
 
@@ -137,6 +135,9 @@ doar gateway-ul (8000) și UI-ul (3000) sunt publicate.
 `HEALTH_FAILURES_TO_DOWN=2`, `CACHE_TTL_SECONDS=30`, `CACHE_WRITE_GUARD_MS=1500`, `REDIS_HOST=redis`.
 
 ## Limitări cunoscute
+
+- Serviciul `sync` ține în memorie coada modificărilor și tokenul de reluare: la repornirea lui, datele se reîmpacă prin copie (inserări/actualizări), dar **ștergerile făcute cât timp era oprit se pot pierde**.
+- Fiecare warehouse = 4 containere (API + 3 baze, câte ~256 MB cache WiredTiger); cu multe warehouse-uri Docker Desktop are nevoie de RAM (4 GB+ pentru 3, mai mult pentru zeci).
 
 - Orchestratorul controlează Docker prin socket (acces privilegiat): acceptabil pentru laborator, nu pentru producție.
 - Gateway-ul e o singură instanță, iar registrul este în memorie (se reconstruiește în ~3 s, când nodurile se reînregistrează).

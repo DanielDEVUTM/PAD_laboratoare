@@ -1,8 +1,9 @@
 # Lab 3 - Web proxy / Data Warehouse cluster (fully dynamic)
 #
-#   client (Postman / UI) --> gateway:8000 --+--> <warehouse>-api \
-#                               |            +--> <warehouse>-api  >--> MongoDB replica set
-#                               | (Redis)    +--> ...             /     (<warehouse>-db, one per warehouse)
+#   client (Postman / UI) --> gateway:8000 --+--> <wh>-api --> <wh>-db-1 (primary)  \  replica set of the warehouse
+#                               |            +--> <wh>-api --> <wh>-db-2 (secondary)  >  = "1 + 2"
+#                               | (Redis)    +--> ...         <wh>-db-3 (secondary) /
+#                               |                      sync service keeps all warehouses identical
 #                               +-- service discovery, health check, round-robin, cache, priority, circuit breaker
 #
 #   orchestrator: creates / removes / stops warehouses (API + its own database) on demand,
@@ -29,6 +30,7 @@ services:
     environment:
       INITIAL_WAREHOUSES: ${INITIAL_WAREHOUSES:-3}
       GATEWAY_URL: http://gateway:8000
+      SYNC_URL: http://sync:8002
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock   # lets it start/stop containers
     depends_on:
@@ -36,6 +38,16 @@ services:
         condition: service_completed_successfully
       gateway:
         condition: service_started
+    restart: unless-stopped
+
+  # keeps the databases of all warehouses identical (change streams); each warehouse's own
+  # 3-member replica set is replicated by MongoDB itself
+  sync:
+    build: ./sync
+    image: lab3-sync
+    environment:
+      ORCHESTRATOR_URL: http://orchestrator:8001
+    depends_on: [orchestrator]
     restart: unless-stopped
 
   # cache (the small "memory" database connected to the gateway)
@@ -51,6 +63,7 @@ services:
     environment:
       REDIS_HOST: redis
       ORCHESTRATOR_URL: http://orchestrator:8001
+      SYNC_URL: http://sync:8002
     depends_on: [redis]
     restart: unless-stopped
 

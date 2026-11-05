@@ -204,7 +204,63 @@
           }
         },
         {
-          "name": "Stop database of wh-1 (master election demo)",
+          "name": "Stop DB member 1 of wh-1 (if it was PRIMARY -> election)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/warehouses/wh-1/db/1",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "warehouses",
+                "wh-1",
+                "db",
+                "1"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"state\":\"stopped\"}"
+            }
+          }
+        },
+        {
+          "name": "Start DB member 1 of wh-1",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/warehouses/wh-1/db/1",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "warehouses",
+                "wh-1",
+                "db",
+                "1"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"state\":\"running\"}"
+            }
+          }
+        },
+        {
+          "name": "Stop ALL 3 DB members of wh-1",
           "request": {
             "method": "PUT",
             "header": [
@@ -231,7 +287,7 @@
           }
         },
         {
-          "name": "Start database of wh-1",
+          "name": "Start ALL 3 DB members of wh-1",
           "request": {
             "method": "PUT",
             "header": [
@@ -846,6 +902,123 @@
                 "instances",
                 "dw-1",
                 "db"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sync & replica sets",
+      "item": [
+        {
+          "name": "Sync service status (per warehouse)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/sync/warehouses",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "sync",
+                "warehouses"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Replica set of wh-1 (members + PRIMARY/SECONDARY)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/admin/instances/wh-1/db",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "admin",
+                "instances",
+                "wh-1",
+                "db"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Replica set of wh-2",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/admin/instances/wh-2/db",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "admin",
+                "instances",
+                "wh-2",
+                "db"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Content of the database of wh-1",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/admin/instances/wh-1/employees?limit=100",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "admin",
+                "instances",
+                "wh-1",
+                "employees"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Content of the database of wh-2",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/admin/instances/wh-2/employees?limit=100",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "admin",
+                "instances",
+                "wh-2",
+                "employees"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Content of the database of wh-3",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/admin/instances/wh-3/employees?limit=100",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "admin",
+                "instances",
+                "wh-3",
+                "employees"
               ]
             }
           }

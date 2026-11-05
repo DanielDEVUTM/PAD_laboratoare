@@ -49,6 +49,21 @@ echo "== replication (every node's DB holds the same data)"
 counts=$(for id in $(curl -s $G/registry/instances | json "' '.join(i['id'] for i in d if i['status']=='UP')"); do curl -s "$G/admin/instances/$id/employees?limit=1" | json "d['total']"; done | sort -u | wc -l | tr -d ' ')
 check "all nodes report the same document count" "$counts" 1
 
+echo "== synchronisation between warehouses (sync service)"
+curl -s -o /dev/null -X PUT $G/employees/sync-check -H 'Content-Type: application/json' -d '{"firstName":"S","lastName":"C","email":"s@c.test"}'
+sleep 4
+miss=0; for id in $(curl -s $G/registry/instances | json "' '.join(i['id'] for i in d if i['status']=='UP')"); do
+  curl -s "$G/admin/instances/$id/employees?limit=500" | json "'sync-check' in [i['id'] for i in d['items']]" | grep -q True || miss=$((miss+1)); done
+check "a write through the gateway reached the database of EVERY warehouse" "$miss" 0
+curl -s -o /dev/null -X DELETE $G/employees/sync-check; sleep 4
+left=0; for id in $(curl -s $G/registry/instances | json "' '.join(i['id'] for i in d if i['status']=='UP')"); do
+  curl -s "$G/admin/instances/$id/employees?limit=500" | json "'sync-check' in [i['id'] for i in d['items']]" | grep -q True && left=$((left+1)); done
+check "a delete reached every warehouse too" "$left" 0
+n=$(curl -s -H 'Cache-Control: no-cache' "$G/admin/instances/$(curl -s $G/registry/instances | json "d[0]['id']")/db" | json "len(d['members'])")
+check "each warehouse database has 3 replica-set members (1 + 2)" "$n" 3
+roles=$(curl -s -H 'Cache-Control: no-cache' "$G/admin/instances/$(curl -s $G/registry/instances | json "d[0]['id']")/db" | json "sorted(m['state'] for m in d['members'])")
+check "roles: 1 PRIMARY + 2 SECONDARY" "$roles" "['PRIMARY', 'SECONDARY', 'SECONDARY']"
+
 echo "== priority queue"
 res=$(curl -s -X POST "$G/admin/priority-tests?normal=30&delayMs=300")
 over=$(echo "$res" | json "d['normalRequests']-(d['highFinishedPosition']-1)")
@@ -66,7 +81,7 @@ check "DELETE /warehouses/smoke-wh -> 202" "$(code -X DELETE $G/warehouses/smoke
 sleep 15
 after=$(curl -s $G/registry/instances | json "len(d)")
 check "warehouse removed (instances back to $before)" "$after" "$before"
-check "its containers are gone" "$(docker ps -a --format '{{.Names}}' | grep -c '^smoke-wh')" 0
+check "its 4 containers are gone (API + 3 DB members)" "$(docker ps -a --format '{{.Names}}' | grep -c '^smoke-wh')" 0
 
 if [ "${1:-}" = "--chaos" ]; then
   W=$(curl -s $G/registry/instances | json "sorted(i['id'] for i in d)[1]")   # an arbitrary warehouse
@@ -89,17 +104,19 @@ if [ "${1:-}" = "--chaos" ]; then
   st=$(curl -s $G/registry/instances | json "[i['status'] for i in d if i['id']=='$W']")
   check "restarted node re-registers by itself" "$st" "['UP']"
 
-  echo "== master election (stop the MongoDB primary)"
-  N=$(curl -s $G/registry/instances | json "d[0]['id']")
-  primary=$(curl -s -H 'Cache-Control: no-cache' "$G/admin/instances/$N/db" | json "[m['name'] for m in d['members'] if m['state']=='PRIMARY'][0]"); pw=${primary%%-db:*}
-  # use a node that is NOT attached to the primary's warehouse for the checks
-  docker stop "$pw-db" >/dev/null; sleep 12
+  echo "== master election inside a warehouse (1 primary + 2 secondaries): stop the PRIMARY member"
+  W=$(curl -s $G/registry/instances | json "d[0]['id']")
+  primary=$(curl -s -H 'Cache-Control: no-cache' "$G/admin/instances/$W/db" | json "[m['name'].split(':')[0] for m in d['members'] if m['state']=='PRIMARY'][0]")
+  docker stop "$primary" >/dev/null; sleep 12
+  newp=$(curl -s -H 'Cache-Control: no-cache' "$G/admin/instances/$W/db" | json "[m['name'].split(':')[0] for m in d['members'] if m['state']=='PRIMARY'][0]")
+  [ -n "$newp" ] && [ "$newp" != "$primary" ] && ok "new primary elected among the other 2: $newp (was $primary)" || ko "no new primary ($newp)"
   c=$(code -X PUT $G/employees/election -H 'Content-Type: application/json' -d '{"firstName":"E","lastName":"L","email":"e@l.test"}')
-  case "$c" in 200|201) ok "write succeeds after the primary ($pw-db) died (HTTP $c)";; *) ko "write failed after primary died (HTTP $c)";; esac
-  other=$(curl -s $G/registry/instances | json "[i['id'] for i in d if i['id']!='$pw'][0]")
-  newp=$(curl -s -H 'Cache-Control: no-cache' "$G/admin/instances/$other/db" | json "[m['name'] for m in d['members'] if m['state']=='PRIMARY'][0]")
-  [ -n "$newp" ] && [ "$newp" != "$primary" ] && ok "new primary elected: $newp (was $primary)" || ko "no new primary ($newp)"
-  docker start "$pw-db" >/dev/null; sleep 10
+  case "$c" in 200|201) ok "writes keep working (HTTP $c)";; *) ko "write failed after primary died (HTTP $c)";; esac
+  sleep 4
+  miss=0; for id in $(curl -s $G/registry/instances | json "' '.join(i['id'] for i in d if i['status']=='UP')"); do
+    curl -s "$G/admin/instances/$id/employees?limit=500" | json "'election' in [i['id'] for i in d['items']]" | grep -q True || miss=$((miss+1)); done
+  check "...and the new write still reached every warehouse" "$miss" 0
+  docker start "$primary" >/dev/null; sleep 8
   curl -s -o /dev/null -X DELETE $G/employees/election
 fi
 
