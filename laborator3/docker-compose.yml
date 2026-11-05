@@ -65,6 +65,17 @@ services:
     depends_on: [redis]
     restart: unless-stopped
 
+  # ---- React + Tailwind console: shows what is in the databases and lets you drive the API
+  ui:
+    build:
+      context: ./ui
+      args:
+        VITE_GATEWAY_URL: http://localhost:8000
+    image: lab3-ui
+    ports: ["3000:80"]
+    depends_on: [gateway]
+    restart: unless-stopped
+
   # ---- the same API, three times (scalability). Add dw-4, dw-5 ... the same way:
   #      they register themselves in the gateway automatically.
   dw-1:

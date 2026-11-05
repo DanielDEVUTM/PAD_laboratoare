@@ -1,0 +1,608 @@
+{
+  "info": {
+    "name": "PAD Lab 3 - Data Warehouse via Gateway",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "All requests go to the gateway only ({{gateway}}). The Data Warehouse nodes are never addressed directly."
+  },
+  "variable": [
+    {
+      "key": "gateway",
+      "value": "http://localhost:8000"
+    }
+  ],
+  "item": [
+    {
+      "name": "CRUD (JSON)",
+      "item": [
+        {
+          "name": "List (offset/limit)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/employees?offset=0&limit=5",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "offset",
+                  "value": "0"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/employees/1",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees",
+                "1"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get by id (query style)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/employees?id=1",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Filter by department",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/employees?department=Sales",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "department",
+                  "value": "Sales"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create (POST)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/employees",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Maria\",\n  \"lastName\": \"Test\",\n  \"email\": \"maria.test@company.test\",\n  \"department\": \"QA\",\n  \"position\": \"Tester\",\n  \"salary\": 3000,\n  \"hireDate\": \"2024-05-01\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Create/replace (PUT)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/employees/100",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees",
+                "100"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Maria\",\n  \"lastName\": \"Test\",\n  \"email\": \"maria.test@company.test\",\n  \"department\": \"QA\",\n  \"position\": \"Tester\",\n  \"salary\": 3000,\n  \"hireDate\": \"2024-05-01\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/employees/100",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees",
+                "100"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "JSON / XML flag",
+      "item": [
+        {
+          "name": "List as XML (?format=xml)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/employees?limit=3&format=xml",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "3"
+                },
+                {
+                  "key": "format",
+                  "value": "xml"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List as XML (Accept header)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/xml"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/employees?limit=3",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "3"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create from XML body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/xml"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/employees?format=xml",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "xml"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "<employee>\n  <firstName>Xml</firstName>\n  <lastName>Client</lastName>\n  <email>xml.client@company.test</email>\n  <department>QA</department>\n</employee>"
+            }
+          }
+        },
+        {
+          "name": "Create from JSON body, answer as XML",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/employees?format=xml",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "xml"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Maria\",\n  \"lastName\": \"Test\",\n  \"email\": \"maria.test@company.test\",\n  \"department\": \"QA\",\n  \"position\": \"Tester\",\n  \"salary\": 3000,\n  \"hireDate\": \"2024-05-01\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Gateway features",
+      "item": [
+        {
+          "name": "Cache: run twice -> X-Cache: HIT",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/employees?limit=5",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cache bypass",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cache-Control",
+                "value": "no-cache"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/employees?limit=5",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Priority HIGH",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Priority",
+                "value": "high"
+              },
+              {
+                "key": "Cache-Control",
+                "value": "no-cache"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/employees?limit=5",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Priority LOW",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Priority",
+                "value": "low"
+              },
+              {
+                "key": "Cache-Control",
+                "value": "no-cache"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/employees?limit=5",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Slow node (3 s) -> timeout -> circuit breaker + retry",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Simulate-Delay-Ms",
+                "value": "3000"
+              },
+              {
+                "key": "Cache-Control",
+                "value": "no-cache"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/employees?limit=5",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "The node sleeps longer than the gateway timeout (2 s): the gateway cuts the connection, opens the circuit and re-sends the request to another instance."
+          }
+        },
+        {
+          "name": "Priority self-test",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/admin/priority-tests?normal=30&delayMs=300",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "admin",
+                "priority-tests"
+              ],
+              "query": [
+                {
+                  "key": "normal",
+                  "value": "30"
+                },
+                {
+                  "key": "delayMs",
+                  "value": "300"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Service discovery / admin",
+      "item": [
+        {
+          "name": "Registered instances",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/registry/instances",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "registry",
+                "instances"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Register an instance manually",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway}}/registry/instances",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "registry",
+                "instances"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\":\"manual-1\",\"url\":\"http://example:8080\"}"
+            }
+          }
+        },
+        {
+          "name": "Deregister",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/registry/instances/manual-1",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "registry",
+                "instances",
+                "manual-1"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Gateway state (cache, queue)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/admin/state",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "admin",
+                "state"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Gateway events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/admin/events",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "admin",
+                "events"
+              ]
+            }
+          }
+        },
+        {
+          "name": "DB of dw-1 (bypasses balancing)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/admin/instances/dw-1/employees",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "admin",
+                "instances",
+                "dw-1",
+                "employees"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Replica-set status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway}}/admin/instances/dw-1/db",
+              "host": [
+                "{{gateway}}"
+              ],
+              "path": [
+                "admin",
+                "instances",
+                "dw-1",
+                "db"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

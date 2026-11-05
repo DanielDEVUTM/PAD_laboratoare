@@ -1,0 +1,34 @@
+# The Data Warehouse API. Scale it freely: `kubectl -n pad-lab3 scale deploy/dw --replicas=5`.
+# Every new pod registers itself in the gateway (service discovery), every deleted pod
+# deregisters (or is removed by the gateway health check).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dw
+  namespace: pad-lab3
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: dw }
+  template:
+    metadata:
+      labels: { app: dw }
+    spec:
+      containers:
+        - name: dw
+          image: lab3-dw-node:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: GATEWAY_URL, value: "http://gateway:8000" }
+            - name: MONGO_URI
+              value: "mongodb://mongo-0.mongo.pad-lab3.svc.cluster.local:27017,mongo-1.mongo.pad-lab3.svc.cluster.local:27017,mongo-2.mongo.pad-lab3.svc.cluster.local:27017/warehouse?replicaSet=rs0&readPreference=secondaryPreferred&w=majority&serverSelectionTimeoutMS=5000&connectTimeoutMS=2000"
+            - name: NODE_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: ADVERTISE_HOST
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 5

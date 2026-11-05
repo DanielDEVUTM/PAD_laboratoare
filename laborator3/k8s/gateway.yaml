@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: pad-lab3
+spec:
+  replicas: 1          # the registry is kept in memory, so one gateway instance
+  selector:
+    matchLabels: { app: gateway }
+  template:
+    metadata:
+      labels: { app: gateway }
+    spec:
+      containers:
+        - name: gateway
+          image: lab3-gateway:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: REDIS_HOST, value: redis }
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: pad-lab3
+spec:
+  type: NodePort
+  selector: { app: gateway }
+  ports:
+    - port: 8000
+      targetPort: 8000
+      nodePort: 30800
