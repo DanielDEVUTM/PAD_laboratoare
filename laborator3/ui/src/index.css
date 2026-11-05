@@ -1,0 +1,4 @@
+@import "tailwindcss";
+
+body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
