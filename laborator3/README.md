@@ -5,9 +5,9 @@ Realizarea transparenței în distribuire: clientul (Postman sau UI) vorbește *
 
 ```
                          ┌───────────── gateway :8000 ─────────────┐
- Postman / UI  ───HTTP──▶│ service discovery · health check        │──▶ dw-1 ┐
-                         │ round-robin · prioritate · cache        │──▶ dw-2 ├─▶ MongoDB replica set
-                         │ circuit breaker + retry                 │──▶ dw-3 ┘   mongo1 · mongo2 · mongo3
+ Postman / UI  ───HTTP──▶│ service discovery · health check        │──▶ wh-1-api ┐
+                         │ round-robin · prioritate · cache        │──▶ wh-2-api ├─▶ MongoDB replica set
+                         │ circuit breaker + retry                 │──▶ …-api    ┘   wh-1-db · wh-2-db · …
                          └───────┬──────────────────┬──────────────┘
                                  │                  └──▶ Redis (cache)
                                  └──▶ orchestrator ──(docker.sock)──▶ creează / șterge warehouse-uri
@@ -118,7 +118,7 @@ independente cu sincronizare scrisă de noi); așa sincronizarea și alegerea ma
 **Docker.** Fiecare serviciu are un `Dockerfile` multi-stage (build Maven/npm într-o imagine mare, rulare într-una mică JRE/nginx).
 `docker-compose.yml` descrie doar componentele fixe: redis, gateway, ui, `orchestrator` și `dw-image` (doar construiește imaginea API).
 Orchestratorul are montat `/var/run/docker.sock` și pornește/oprește containere prin Docker Engine API; containerele dinamice intră în același
-network și proiect compose. Mongo și API-urile **nu** sunt în compose. Serviciile se găsesc după nume (DNS-ul rețelei Docker: `mongo1`, `redis`, `gateway`);
+network și proiect compose. Mongo și API-urile **nu** sunt în compose. Serviciile se găsesc după nume (DNS-ul rețelei Docker: `wh-1-db`, `redis`, `gateway`);
 doar gateway-ul (8000) și UI-ul (3000) sunt publicate.
 
 **Kubernetes** (`k8s/`, aplicat cu `./k8s/deploy.sh`):
