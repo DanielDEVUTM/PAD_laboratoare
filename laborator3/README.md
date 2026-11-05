@@ -58,7 +58,9 @@ Câmpuri: `id, firstName*, lastName*, email*, department, position, salary, hire
 
 Management (prin gateway, servit de orchestrator): `GET /warehouses`, `POST /warehouses {name?, count?}`, `DELETE /warehouses/{name}`, `PUT /warehouses/{name}/api|db {"state":"running|stopped|frozen"}`.
 
-**Acces direct la un singur API (pentru teste):** `/nodes/{warehouse}/...`, de exemplu `GET http://localhost:8000/nodes/wh-1/employees/1` sau `POST /nodes/wh-1/employees`. Cererea ajunge exact la acel nod (fără round-robin, fără cache); `X-Served-By` confirmă nodul. Datele scrise acolo se propagă prin `sync` în toate warehouse-urile.
+**Adresa proprie a fiecărui API (pentru teste):** orchestratorul publică API-ul fiecărui warehouse pe un port al gazdei: `wh-1` → `http://localhost:8101`, `wh-2` → `8102`, `wh-3` → `8103`, următoarele primesc automat `8104`, `8105`… (adresa apare în UI, pe cardul warehouse-ului, și în `GET /warehouses`, câmpul `api.url`). Se dezactivează cu `PUBLISH_API_PORTS=false` (atunci rămân doar gateway-ul și UI-ul expuse). Scrierile făcute direct într-un API se propagă prin `sync` în toate warehouse-urile.
+
+**Acces direct prin gateway (alternativă):** `/nodes/{warehouse}/...`, de exemplu `GET http://localhost:8000/nodes/wh-1/employees/1` sau `POST /nodes/wh-1/employees`. Cererea ajunge exact la acel nod (fără round-robin, fără cache); `X-Served-By` confirmă nodul. Datele scrise acolo se propagă prin `sync` în toate warehouse-urile.
 
 Endpoint-uri ale gateway-ului: `GET /registry/instances`, `POST /registry/instances`, `DELETE /registry/instances/{id}`,
 `GET /admin/state`, `GET /admin/events`, `GET /admin/instances/{id}/employees|db` (conținutul unei baze anume, ocolind balansarea),

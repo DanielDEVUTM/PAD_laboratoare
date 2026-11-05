@@ -120,6 +120,11 @@ export default function WarehousePanel({ tick, sync }) {
                   <Button disabled={busy || w.api.state !== 'running'} onClick={() => run(() => manage('PUT', `/warehouses/${w.name}/api`, { state: 'frozen' }))}>Freeze</Button>
                 </div>
               ) : <div className="mt-1 text-xs text-slate-600">not started yet</div>}
+              {w.api?.url && (
+                <div className="mt-1.5 text-[11px] text-slate-500">
+                  direct address (Postman): <a href={w.api.url + '/employees'} target="_blank" rel="noreferrer" className="mono text-sky-300 hover:underline">{w.api.url}</a>
+                </div>
+              )}
 
               <div className="mt-3 flex items-center justify-between text-[11px] uppercase tracking-wider text-slate-500">
                 <span>Database · replica set rs-{w.name}</span>

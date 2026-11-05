@@ -8,6 +8,18 @@
     {
       "key": "gateway",
       "value": "http://localhost:8000"
+    },
+    {
+      "key": "wh1",
+      "value": "http://localhost:8101"
+    },
+    {
+      "key": "wh2",
+      "value": "http://localhost:8102"
+    },
+    {
+      "key": "wh3",
+      "value": "http://localhost:8103"
     }
   ],
   "item": [
@@ -316,8 +328,8 @@
       ]
     },
     {
-      "name": "Direct to ONE warehouse API (wh-1)",
-      "description": "No round-robin, no cache: the request goes exactly to that node (X-Served-By confirms it). Replace wh-1 with wh-2, wh-3...",
+      "name": "Direct to ONE warehouse API (own port)",
+      "description": "Each warehouse API is published on its own host port: wh-1 -> 8101, wh-2 -> 8102, ... (see the UI card). Variables wh1, wh2, wh3.",
       "item": [
         {
           "name": "wh-1: list",
@@ -325,13 +337,11 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{gateway}}/nodes/wh-1/employees?limit=5",
+              "raw": "{{wh1}}/employees?limit=5",
               "host": [
-                "{{gateway}}"
+                "{{wh1}}"
               ],
               "path": [
-                "nodes",
-                "wh-1",
                 "employees"
               ],
               "query": [
@@ -349,13 +359,89 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{gateway}}/nodes/wh-1/employees/1",
+              "raw": "{{wh1}}/employees/1",
               "host": [
-                "{{gateway}}"
+                "{{wh1}}"
               ],
               "path": [
-                "nodes",
-                "wh-1",
+                "employees",
+                "1"
+              ]
+            }
+          }
+        },
+        {
+          "name": "wh-2: list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{wh2}}/employees?limit=5",
+              "host": [
+                "{{wh2}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "wh-2: get one",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{wh2}}/employees/1",
+              "host": [
+                "{{wh2}}"
+              ],
+              "path": [
+                "employees",
+                "1"
+              ]
+            }
+          }
+        },
+        {
+          "name": "wh-3: list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{wh3}}/employees?limit=5",
+              "host": [
+                "{{wh3}}"
+              ],
+              "path": [
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "wh-3: get one",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{wh3}}/employees/1",
+              "host": [
+                "{{wh3}}"
+              ],
+              "path": [
                 "employees",
                 "1"
               ]
@@ -373,13 +459,11 @@
               }
             ],
             "url": {
-              "raw": "{{gateway}}/nodes/wh-1/employees",
+              "raw": "{{wh1}}/employees",
               "host": [
-                "{{gateway}}"
+                "{{wh1}}"
               ],
               "path": [
-                "nodes",
-                "wh-1",
                 "employees"
               ]
             },
@@ -400,13 +484,11 @@
               }
             ],
             "url": {
-              "raw": "{{gateway}}/nodes/wh-1/employees/direct-1",
+              "raw": "{{wh1}}/employees/direct-1",
               "host": [
-                "{{gateway}}"
+                "{{wh1}}"
               ],
               "path": [
-                "nodes",
-                "wh-1",
                 "employees",
                 "direct-1"
               ]
@@ -423,13 +505,11 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{gateway}}/nodes/wh-1/employees/direct-1",
+              "raw": "{{wh1}}/employees/direct-1",
               "host": [
-                "{{gateway}}"
+                "{{wh1}}"
               ],
               "path": [
-                "nodes",
-                "wh-1",
                 "employees",
                 "direct-1"
               ]
@@ -442,13 +522,11 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{gateway}}/nodes/wh-1/employees?limit=3&format=xml",
+              "raw": "{{wh1}}/employees?limit=3&format=xml",
               "host": [
-                "{{gateway}}"
+                "{{wh1}}"
               ],
               "path": [
-                "nodes",
-                "wh-1",
                 "employees"
               ],
               "query": [
@@ -470,13 +548,11 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{gateway}}/nodes/wh-1/health",
+              "raw": "{{wh1}}/health",
               "host": [
-                "{{gateway}}"
+                "{{wh1}}"
               ],
               "path": [
-                "nodes",
-                "wh-1",
                 "health"
               ]
             }
@@ -488,63 +564,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{gateway}}/nodes/wh-1/admin/db",
+              "raw": "{{wh1}}/admin/db",
               "host": [
-                "{{gateway}}"
+                "{{wh1}}"
               ],
               "path": [
-                "nodes",
-                "wh-1",
                 "admin",
                 "db"
-              ]
-            }
-          }
-        },
-        {
-          "name": "wh-2: list",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{gateway}}/nodes/wh-2/employees?limit=5",
-              "host": [
-                "{{gateway}}"
-              ],
-              "path": [
-                "nodes",
-                "wh-2",
-                "employees"
-              ],
-              "query": [
-                {
-                  "key": "limit",
-                  "value": "5"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "wh-3: list",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{gateway}}/nodes/wh-3/employees?limit=5",
-              "host": [
-                "{{gateway}}"
-              ],
-              "path": [
-                "nodes",
-                "wh-3",
-                "employees"
-              ],
-              "query": [
-                {
-                  "key": "limit",
-                  "value": "5"
-                }
               ]
             }
           }

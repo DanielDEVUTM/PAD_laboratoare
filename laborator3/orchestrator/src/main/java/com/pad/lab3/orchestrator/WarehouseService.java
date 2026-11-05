@@ -38,6 +38,8 @@ public class WarehouseService {
     private final DockerOps docker;
     private final String dwImage, mongoImage, gatewayUrl, syncUrl;
     private final int initial;
+    private final boolean publishPorts;
+    private final int apiPortBase;
     private final String seedScript;
     private final Map<String, String> phases = new ConcurrentHashMap<>();
     private final ExecutorService pool = Executors.newCachedThreadPool();
@@ -48,7 +50,11 @@ public class WarehouseService {
                             @Value("${orchestrator.mongo-image}") String mongoImage,
                             @Value("${orchestrator.gateway-url}") String gatewayUrl,
                             @Value("${orchestrator.sync-url}") String syncUrl,
-                            @Value("${orchestrator.initial-warehouses}") int initial) throws Exception {
+                            @Value("${orchestrator.initial-warehouses}") int initial,
+                            @Value("${orchestrator.publish-api-ports}") boolean publishPorts,
+                            @Value("${orchestrator.api-port-base}") int apiPortBase) throws Exception {
+        this.publishPorts = publishPorts;
+        this.apiPortBase = apiPortBase;
         this.docker = docker;
         this.dwImage = dwImage;
         this.mongoImage = mongoImage;
@@ -81,7 +87,15 @@ public class WarehouseService {
             Map<String, Object> w = byName.computeIfAbsent(wh, k -> new LinkedHashMap<>(Map.of("name", k)));
             String name = c.getNames()[0].substring(1);
             if (role.equals("api")) {
-                w.put("api", Map.of("container", name, "state", simpleState(c.getState())));
+                Map<String, Object> api = new LinkedHashMap<>();
+                api.put("container", name);
+                api.put("state", simpleState(c.getState()));
+                String hp = c.getLabels().get(DockerOps.LABEL_HOSTPORT);
+                if (hp != null) {
+                    api.put("port", Integer.parseInt(hp));
+                    api.put("url", "http://localhost:" + hp);
+                }
+                w.put("api", api);
             } else {
                 members.computeIfAbsent(wh, k -> new ArrayList<>())
                         .add(Map.of("container", name, "state", simpleState(c.getState())));
@@ -206,14 +220,55 @@ public class WarehouseService {
             if (i > 1) hosts.append(',');
             hosts.append(dbName(name, i)).append(":27017");
         }
-        docker.createAndStart(name + "-api", name, "api", dwImage, List.of(
+        List<String> env = List.of(
                 "NODE_ID=" + name,
                 "GATEWAY_URL=" + gatewayUrl,
                 "MONGO_URI=mongodb://" + hosts + "/warehouse?replicaSet=" + rs
-                        + "&readPreference=secondaryPreferred&w=majority&serverSelectionTimeoutMS=5000&connectTimeoutMS=2000"), null);
+                        + "&readPreference=secondaryPreferred&w=majority&serverSelectionTimeoutMS=5000&connectTimeoutMS=2000");
+        startApi(name, env);
         phases.remove(name);
         log.info("Warehouse {} is ready", name);
     }
+
+    /** Publishes the API of the warehouse on its own host port (first free one from apiPortBase), for direct testing. */
+    private void startApi(String name, List<String> env) {
+        if (!publishPorts) {
+            docker.createAndStart(name + "-api", name, "api", dwImage, env, null);
+            return;
+        }
+        Exception last = null;
+        for (int attempt = 0; attempt < 20; attempt++) {
+            int port = reservePort(name);
+            try {
+                docker.createAndStart(name + "-api", name, "api", dwImage, env, null, port, 8080);
+                return;
+            } catch (Exception e) {       // port taken by something else on the host: try the next one
+                last = e;
+                docker.remove(name + "-api");
+                releasePort(name);
+                blockedPorts.add(port);
+            }
+        }
+        throw new IllegalStateException("no free host port for the API: " + last);
+    }
+
+    private final Map<String, Integer> reservedPorts = new ConcurrentHashMap<>();
+    private final Set<Integer> blockedPorts = ConcurrentHashMap.newKeySet();
+
+    private synchronized int reservePort(String name) {
+        Set<Integer> used = new HashSet<>(blockedPorts);
+        used.addAll(reservedPorts.values());
+        for (Container c : docker.managed()) {
+            String hp = c.getLabels().get(DockerOps.LABEL_HOSTPORT);
+            if (hp != null) used.add(Integer.parseInt(hp));
+        }
+        int p = apiPortBase;
+        while (used.contains(p)) p++;
+        reservedPorts.put(name, p);
+        return p;
+    }
+
+    private void releasePort(String name) { reservedPorts.remove(name); }
 
     private boolean syncReady(String name) {
         try {

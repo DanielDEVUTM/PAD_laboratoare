@@ -6,7 +6,10 @@ import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.Frame;
+import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.HostConfig;
+import com.github.dockerjava.api.model.PortBinding;
+import com.github.dockerjava.api.model.Ports;
 import com.github.dockerjava.api.model.RestartPolicy;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
@@ -77,12 +80,21 @@ public class DockerOps {
                 .findFirst().orElse(null);
     }
 
+    public static final String LABEL_HOSTPORT = "lab3.hostport";
+
     public void createAndStart(String name, String warehouse, String role, String image,
                                List<String> env, List<String> cmd) {
+        createAndStart(name, warehouse, role, image, env, cmd, null, 0);
+    }
+
+    /** hostPort != null publishes containerPort on that port of the host. */
+    public void createAndStart(String name, String warehouse, String role, String image,
+                               List<String> env, List<String> cmd, Integer hostPort, int containerPort) {
         Map<String, String> labels = new LinkedHashMap<>();
         labels.put(LABEL_MANAGED, "true");
         labels.put(LABEL_WAREHOUSE, warehouse);
         labels.put(LABEL_ROLE, role);
+        if (hostPort != null) labels.put(LABEL_HOSTPORT, String.valueOf(hostPort));
         if (composeProject != null) {   // lets `docker compose down --remove-orphans` clean them up
             labels.put("com.docker.compose.project", composeProject);
             labels.put("com.docker.compose.service", "warehouse-" + role);
@@ -92,6 +104,10 @@ public class DockerOps {
                 .withLabels(labels)
                 .withHostConfig(HostConfig.newHostConfig().withNetworkMode(network)
                         .withRestartPolicy(RestartPolicy.unlessStoppedRestart()));
+        if (hostPort != null) {
+            c.getHostConfig().withPortBindings(new PortBinding(Ports.Binding.bindPort(hostPort), ExposedPort.tcp(containerPort)));
+            c.withExposedPorts(ExposedPort.tcp(containerPort));
+        }
         if (env != null) c.withEnv(env);
         if (cmd != null) c.withCmd(cmd);
         String id = c.exec().getId();
