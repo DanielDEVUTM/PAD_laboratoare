@@ -55,3 +55,17 @@ export async function getJson(path) {
   if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`)
   return res.json()
 }
+
+/** Management API (served by the orchestrator, reached through the gateway). */
+export async function manage(method, path, body) {
+  const res = await fetch(GATEWAY + path, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const text = await res.text()
+  let data = null
+  try { data = text ? JSON.parse(text) : null } catch { data = text }
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+  return data
+}

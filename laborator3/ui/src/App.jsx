@@ -6,6 +6,7 @@ import EmployeesPanel from './components/EmployeesPanel.jsx'
 import ResponsePanel from './components/ResponsePanel.jsx'
 import PriorityDemo from './components/PriorityDemo.jsx'
 import EventLog from './components/EventLog.jsx'
+import WarehousePanel from './components/WarehousePanel.jsx'
 
 export default function App() {
   const [state, setState] = useState(null)
@@ -42,6 +43,7 @@ export default function App() {
       </header>
 
       <div className="grid gap-4">
+        <WarehousePanel tick={tick} />
         <ClusterPanel state={state} error={error} />
         <div className="grid gap-4 lg:grid-cols-2">
           <DatabasePanel instances={state?.instances ?? []} tick={tick} />
