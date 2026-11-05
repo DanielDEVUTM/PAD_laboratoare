@@ -11,7 +11,8 @@ import java.util.NoSuchElementException;
  * GET    /warehouses                     list (state of the API and of the database of every warehouse)
  * POST   /warehouses {name?, count?}     create one or several warehouses (API + its own database)
  * DELETE /warehouses/{name}              remove a warehouse (API + database, leaves the replica set)
- * PUT    /warehouses/{name}/api|db {state: running|stopped|frozen}   start / stop / freeze a component
+ * PUT    /warehouses/{name}/api|db {state: running|stopped|frozen}   start / stop / freeze the API or the whole database (3 members)
+ * PUT    /warehouses/{name}/db/{1|2|3} {state: ...}                  the same for ONE member of the warehouse's replica set
  */
 @RestController
 @RequestMapping("/warehouses")
@@ -46,8 +47,16 @@ public class WarehouseController {
     public ResponseEntity<Map<String, String>> state(@PathVariable String name, @PathVariable String role,
                                                      @RequestBody Map<String, String> body) {
         if (!role.equals("api") && !role.equals("db")) throw new IllegalArgumentException("role must be api or db");
-        service.setState(name, role, body.get("state"));
+        service.setState(name, role, null, body.get("state"));
         return ResponseEntity.ok(Map.of("warehouse", name, "component", role, "state", body.get("state")));
+    }
+
+    @PutMapping("/{name}/db/{member}")
+    public ResponseEntity<Map<String, String>> memberState(@PathVariable String name, @PathVariable int member,
+                                                           @RequestBody Map<String, String> body) {
+        if (member < 1 || member > WarehouseService.DB_MEMBERS) throw new IllegalArgumentException("member must be 1.." + WarehouseService.DB_MEMBERS);
+        service.setState(name, "db", member, body.get("state"));
+        return ResponseEntity.ok(Map.of("warehouse", name, "component", "db-" + member, "state", body.get("state")));
     }
 
     @ExceptionHandler({IllegalArgumentException.class, IllegalStateException.class})

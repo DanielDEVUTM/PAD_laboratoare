@@ -13,8 +13,8 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 
 /**
- * /warehouses/** is the management API (create / remove / stop warehouses). It is served by the
- * orchestrator, but clients still talk only to the gateway.
+ * /warehouses/** is the management API (create / remove / stop warehouses) served by the orchestrator,
+ * /sync/** is the status of the synchronisation service. Clients still talk only to the gateway.
  */
 @RestController
 public class OrchestratorController {
@@ -22,14 +22,18 @@ public class OrchestratorController {
     private final HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(2)).build();
     private final String orchestratorUrl;
+    private final String syncUrl;
 
-    public OrchestratorController(@Value("${gateway.orchestrator-url}") String orchestratorUrl) {
+    public OrchestratorController(@Value("${gateway.orchestrator-url}") String orchestratorUrl,
+                                  @Value("${gateway.sync-url}") String syncUrl) {
         this.orchestratorUrl = orchestratorUrl.replaceAll("/+$", "");
+        this.syncUrl = syncUrl.replaceAll("/+$", "");
     }
 
-    @RequestMapping({"/warehouses", "/warehouses/**"})
+    @RequestMapping({"/warehouses", "/warehouses/**", "/sync", "/sync/**"})
     public ResponseEntity<byte[]> forward(HttpServletRequest request) throws Exception {
-        String target = orchestratorUrl + request.getRequestURI()
+        String base = request.getRequestURI().startsWith("/sync") ? syncUrl : orchestratorUrl;
+        String target = base + request.getRequestURI()
                 + (request.getQueryString() != null ? "?" + request.getQueryString() : "");
         byte[] body = request.getInputStream().readAllBytes();
         try {
