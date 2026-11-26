@@ -113,7 +113,7 @@ Pipeline-ul [lab4-ci-cd.yml](../.github/workflows/lab4-ci-cd.yml):
 
 | Când | Ce face |
 |---|---|
-| push pe `laborator4`, PR spre `main` | teste unitare, verificare Terraform și scripturi, build `linux/amd64`, teste de integrare |
+| orice push (orice ramură care conține workflow-ul), orice PR spre `main` | teste unitare, verificare Terraform și scripturi, build `linux/amd64`, teste de integrare |
 | push / merge pe `main` | toate cele de mai sus + publică imaginile în GHCR + deploy și verificare |
 
 Instanțele trebuie să fie **pornite** în momentul deploy-ului. După configurare: *Actions → lab4 CI/CD → Run workflow* pe `main`.

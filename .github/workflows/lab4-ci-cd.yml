@@ -1,15 +1,14 @@
 # Lab 4 - CI/CD
-#   every push / pull request : unit tests, Terraform checks, linux/amd64 build, integration tests
-#   push to main              : publish the images to GHCR and deploy them to AWS (after manual approval)
+#   every push / pull request to main : unit tests, Terraform checks, linux/amd64 build, integration tests
+#   push to main                      : publish the images to GHCR and deploy them to AWS (after manual approval)
 name: lab4 CI/CD
 
+# every change starts the pipeline, on any branch that contains this file (no path filter)
 on:
   push:
-    branches: [main, laborator4]
-    paths: ['laborator4/**', '.github/workflows/lab4-ci-cd.yml']
+    branches: ['**']
   pull_request:
     branches: [main]
-    paths: ['laborator4/**', '.github/workflows/lab4-ci-cd.yml']
   workflow_dispatch:
 
 permissions:
