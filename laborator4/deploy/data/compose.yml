@@ -1,0 +1,40 @@
+# VM "data" (private): orchestrator, sync and the warehouses (API + 3 MongoDB) it creates.
+# Variables: /etc/pad/infra.env (written by cloud-init) + release.env (written by deploy.sh).
+name: pad-lab4-data
+
+services:
+  # only makes `docker compose pull` fetch the image the orchestrator uses for every API container
+  dw-image:
+    image: ${IMAGE_PREFIX:?}-dw-node:${TAG:?}
+    entrypoint: ["true"]
+    restart: "no"
+
+  orchestrator:
+    image: ${IMAGE_PREFIX:?}-orchestrator:${TAG:?}
+    environment:
+      DW_IMAGE: ${IMAGE_PREFIX:?}-dw-node:${TAG:?}
+      INITIAL_WAREHOUSES: ${INITIAL_WAREHOUSES:-1}
+      GATEWAY_URL: http://${EDGE_PRIVATE_IP:?}:8000
+      SYNC_URL: http://sync:8002
+      ADVERTISE_HOST: ${DATA_PRIVATE_IP:?}                 # address the gateway uses to reach the APIs
+      PUBLISH_BIND_IP: ${BIND_IP:-${DATA_PRIVATE_IP:?}}
+      PUBLISH_API_PORTS: "true"
+      PUBLISH_DB_PORTS: "false"                            # MongoDB has no password: never publish it here
+      API_MEMORY_MB: ${API_MEMORY_MB:-384}
+    ports: ["${BIND_IP:-${DATA_PRIVATE_IP:?}}:8001:8001"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock          # lets it start/stop containers
+    depends_on:
+      dw-image:
+        condition: service_completed_successfully
+    mem_limit: 384m
+    restart: unless-stopped
+
+  sync:
+    image: ${IMAGE_PREFIX:?}-sync:${TAG:?}
+    environment:
+      ORCHESTRATOR_URL: http://orchestrator:8001
+    ports: ["${BIND_IP:-${DATA_PRIVATE_IP:?}}:8002:8002"]
+    depends_on: [orchestrator]
+    mem_limit: 384m
+    restart: unless-stopped

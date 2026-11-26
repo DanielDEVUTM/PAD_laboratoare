@@ -1,0 +1,30 @@
+# Reverse proxy: the only thing reachable from the internet.
+# SITE_ADDRESS = ":80" (plain HTTP) or a domain name (HTTPS with an automatic Let's Encrypt certificate).
+{
+	admin off
+}
+
+{$SITE_ADDRESS} {
+	route {
+		# open health endpoint: used by the pipeline, reveals nothing about the data
+		handle /healthz {
+			rewrite * /health
+			reverse_proxy gateway:8000
+		}
+
+		# everything else needs the password (the gateway itself has no authentication)
+		basic_auth {
+			{$ADMIN_USER} {$ADMIN_PASSWORD_HASH}
+		}
+
+		handle_path /api/* {
+			reverse_proxy gateway:8000 {
+				header_up -Authorization
+			}
+		}
+
+		handle {
+			reverse_proxy ui:80
+		}
+	}
+}

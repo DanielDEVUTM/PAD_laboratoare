@@ -1,0 +1,17 @@
+# copy to terraform.tfvars (ignored by git) and fill in
+region = "eu-central-1"
+
+ssh_public_keys = [
+  "ssh-ed25519 AAAA... your key",
+  "ssh-ed25519 AAAA... key of the CI/CD pipeline",
+]
+
+# cheap mode (default): 1 warehouse
+# edge_instance_type = "t3.micro"
+# data_instance_type = "t3.small"
+# for the presentation, 2-3 warehouses (resizing keeps the data):
+# data_instance_type = "c7i-flex.large"
+
+# enable_https   = true
+# domain_name    = ""
+# auto_stop_time = "23:00"

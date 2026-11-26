@@ -1,0 +1,183 @@
+# Lab 4 - CI/CD
+#   every push / pull request : unit tests, Terraform checks, linux/amd64 build, integration tests
+#   push to main              : publish the images to GHCR and deploy them to AWS (after manual approval)
+name: lab4 CI/CD
+
+on:
+  push:
+    branches: [main, laborator4]
+    paths: ['laborator4/**', '.github/workflows/lab4-ci-cd.yml']
+  pull_request:
+    branches: [main]
+    paths: ['laborator4/**', '.github/workflows/lab4-ci-cd.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lab4-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test-java:
+    name: unit tests (${{ matrix.service }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [gateway, dw-node, orchestrator, sync]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: laborator4/${{ matrix.service }}/pom.xml
+      - run: mvn -B -ntp verify
+        working-directory: laborator4/${{ matrix.service }}
+
+  test-ui:
+    name: unit tests (ui)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: laborator4/ui
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: laborator4/ui/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+
+  infrastructure:
+    name: terraform and scripts
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: laborator4
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.17.2
+          terraform_wrapper: false
+      - run: terraform -chdir=terraform fmt -check -diff
+      - run: terraform -chdir=terraform init -backend=false -input=false
+      - run: terraform -chdir=terraform validate
+      - run: shellcheck --severity=warning deploy/*.sh terraform/nat.sh
+
+  build:
+    name: build linux/amd64, integration tests
+    needs: [test-java, test-ui]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    defaults:
+      run:
+        working-directory: laborator4
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the images
+        run: |
+          for service in dw-node gateway sync; do
+            docker build --platform linux/amd64 -t "lab4-$service" "./$service"
+          done
+          docker build --platform linux/amd64 -t lab4-orchestrator -f orchestrator/Dockerfile .
+          # behind the reverse proxy the UI calls the gateway on its own origin
+          docker build --platform linux/amd64 -t lab4-ui --build-arg VITE_GATEWAY_URL=/api ./ui
+
+      - name: Integration tests (single host, with failure injection)
+        run: |
+          INITIAL_WAREHOUSES=2 docker compose up -d --no-build
+          for _ in $(seq 1 100); do
+            up=$(curl -s localhost:8000/registry/instances | grep -o '"status":"UP"' | wc -l)
+            [ "$up" -ge 2 ] && break
+            sleep 3
+          done
+          ./scripts/smoke-test.sh --chaos
+
+      - name: Logs of the failed cluster
+        if: failure()
+        run: docker ps -a && docker compose logs --tail 80
+
+      - name: Stop the single-host cluster
+        if: always()
+        run: ./scripts/down.sh
+
+      - name: Integration tests (cloud topology, proxy with password, rolling update)
+        run: HOST_IP=$(hostname -I | awk '{print $1}') ./deploy/test-topology.sh
+
+      # the images that were just tested are the ones published
+      - name: Log in to GitHub Container Registry
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the images
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          prefix="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/pad-lab4"
+          for service in dw-node gateway sync orchestrator ui; do
+            docker tag "lab4-$service" "$prefix-$service:$GITHUB_SHA"
+            docker push "$prefix-$service:$GITHUB_SHA"
+          done
+
+  deploy:
+    name: deploy to AWS
+    needs: [build, infrastructure]
+    # enabled by the repository variable DEPLOY_ENABLED=true, once the infrastructure exists
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    # Continuous Delivery: add "required reviewers" to this environment to approve every deployment
+    environment:
+      name: production
+      url: ${{ vars.SITE_URL }}
+    concurrency:
+      group: lab4-deploy
+    permissions:
+      contents: read
+      packages: read
+    defaults:
+      run:
+        working-directory: laborator4
+    env:
+      ADMIN_USER: ${{ vars.ADMIN_USER }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/key"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$RUNNER_TEMP/key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/known_hosts"
+
+      - name: Deploy
+        env:
+          EDGE_HOST: ${{ vars.EDGE_HOST }}
+          SSH_KEY: ${{ runner.temp }}/key
+          SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/known_hosts
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          export IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/pad-lab4" TAG="$GITHUB_SHA"
+          ./deploy/deploy.sh
+
+      - name: Check the deployed system
+        env:
+          BASE_URL: ${{ vars.SITE_URL }}
+        run: ./deploy/verify.sh

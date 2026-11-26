@@ -1,0 +1,79 @@
+# Lab 4 (local run) - Web proxy / Data Warehouse cluster (fully dynamic)
+#
+#   client (Postman / UI) --> gateway:8000 --+--> <wh>-api --> <wh>-db-1 (primary)  \  replica set of the warehouse
+#                               |            +--> <wh>-api --> <wh>-db-2 (secondary)  >  = "1 + 2"
+#                               | (Redis)    +--> ...         <wh>-db-3 (secondary) /
+#                               |                      sync service keeps all warehouses identical
+#                               +-- service discovery, health check, round-robin, cache, priority, circuit breaker
+#
+#   orchestrator: creates / removes / stops warehouses (API + its own database) on demand,
+#                 commanded from the UI or Postman through the gateway: POST /warehouses ...
+#
+# NOTHING about the number of warehouses is written here. At first start the orchestrator creates
+# INITIAL_WAREHOUSES (default 3, can be 0) so there is something to look at; add or remove as many
+# as you want afterwards. Only the gateway (8000) and the UI (3000) are published.
+name: pad-lab4
+
+services:
+  # build-only: builds the image that the orchestrator uses for every new API container
+  dw-image:
+    build: ./dw-node
+    image: lab4-dw-node
+    entrypoint: ["true"]
+    restart: "no"
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
+    image: lab4-orchestrator
+    environment:
+      INITIAL_WAREHOUSES: ${INITIAL_WAREHOUSES:-3}
+      GATEWAY_URL: http://gateway:8000
+      SYNC_URL: http://sync:8002
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # lets it start/stop containers
+    depends_on:
+      dw-image:
+        condition: service_completed_successfully
+      gateway:
+        condition: service_started
+    restart: unless-stopped
+
+  # keeps the databases of all warehouses identical (change streams); each warehouse's own
+  # 3-member replica set is replicated by MongoDB itself
+  sync:
+    build: ./sync
+    image: lab4-sync
+    environment:
+      ORCHESTRATOR_URL: http://orchestrator:8001
+    depends_on: [orchestrator]
+    restart: unless-stopped
+
+  # cache (the small "memory" database connected to the gateway)
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+
+  gateway:
+    build: ./gateway
+    image: lab4-gateway
+    ports: ["8000:8000"]
+    environment:
+      REDIS_HOST: redis
+      ORCHESTRATOR_URL: http://orchestrator:8001
+      SYNC_URL: http://sync:8002
+    depends_on: [redis]
+    restart: unless-stopped
+
+  # React + Tailwind console
+  ui:
+    build:
+      context: ./ui
+      args:
+        VITE_GATEWAY_URL: http://localhost:8000
+    image: lab4-ui
+    ports: ["3000:80"]
+    depends_on: [gateway]
+    restart: unless-stopped
