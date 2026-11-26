@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subscriber App</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#121927; --panel-2:#0f1521; --border:#232f45;
+    --text:#e7ecf5; --text-dim:#8a96ab; --accent:#c084fc;
+    --ok:#4ade80; --err:#f87171; --warn:#fbbf24; --mono:'Consolas','SFMono-Regular',Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,Segoe UI,Roboto,sans-serif;}
+  header{
+    display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    padding:14px 20px; border-bottom:1px solid var(--border); background:var(--panel-2);
+  }
+  header h1{font-size:16px; margin:0;}
+  header h1 span{color:var(--accent);}
+  .target{font-size:12px; color:var(--text-dim); font-family:var(--mono);}
+  .status{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim);}
+  .dot{width:8px; height:8px; border-radius:50%; background:var(--text-dim);}
+  .dot.on{background:var(--ok); box-shadow:0 0 6px var(--ok);}
+  .dot.off{background:var(--err); box-shadow:0 0 6px var(--err);}
+  .dot.connected{background:var(--ok); box-shadow:0 0 5px var(--ok);}
+  .dot.reconnecting{background:var(--warn); box-shadow:0 0 5px var(--warn);}
+
+  main{max-width:640px; margin:0 auto; padding:20px 16px 60px;}
+  label{font-size:11.5px; color:var(--text-dim); display:block; margin-bottom:4px;}
+  input[type=text]{
+    width:100%; background:var(--panel-2); border:1px solid var(--border); border-radius:8px;
+    color:var(--text); padding:9px 10px; font-size:13px; font-family:var(--mono);
+  }
+  .row{display:flex; gap:8px; margin-bottom:10px;}
+  .row > *{flex:1;}
+  button{
+    background:var(--accent); color:#1c0730; border:none; border-radius:8px;
+    padding:9px 14px; font-size:13px; font-weight:700; cursor:pointer;
+  }
+  button.ghost{background:var(--panel-2); color:var(--text-dim); border:1px solid var(--border);}
+  button:disabled{opacity:.5; cursor:not-allowed;}
+
+  .instance-id{font-size:11px; color:var(--text-dim); font-family:var(--mono); margin-bottom:14px;}
+  .instance-id b{color:var(--text);}
+
+  .sub-card{border:1px solid var(--border); border-radius:10px; background:var(--panel); overflow:hidden; margin-bottom:14px;}
+  .sub-card-head{display:flex; align-items:center; gap:8px; padding:9px 12px; border-bottom:1px solid var(--border); font-size:12px;}
+  .sub-card-head .topic{font-weight:700; font-family:var(--mono);}
+  .sub-card-head .id{color:var(--text-dim); font-family:var(--mono); font-size:10.5px;}
+  .sub-card-head .spacer{flex:1;}
+  .sub-card-body{max-height:320px; overflow:auto; padding:10px 12px; display:flex; flex-direction:column; gap:8px;}
+  .sub-msg{font-size:12px; border-bottom:1px dashed var(--border); padding-bottom:6px;}
+  .sub-msg .top{display:flex; justify-content:space-between; color:var(--text-dim); font-size:10.5px; font-family:var(--mono); margin-bottom:3px;}
+  .sub-msg pre{margin:0; white-space:pre-wrap; word-break:break-word; font-family:var(--mono); font-size:12px;}
+  .empty{color:var(--text-dim); font-size:12.5px; text-align:center; padding:24px 8px;}
+  .hint{font-size:11px; color:var(--text-dim); margin-top:8px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Subscriber <span>App</span></h1>
+  <div class="target">Broker țintă: <span id="targetLabel">...</span></div>
+  <div class="status">
+    <span id="statusDot" class="dot"></span>
+    <span id="statusText">Verific...</span>
+  </div>
+</header>
+
+<main>
+  <div class="instance-id">Instanța acestui proces: <b id="instanceIdLabel">...</b> · port <b id="instancePortLabel">...</b></div>
+
+  <div id="connectForm">
+    <div class="row">
+      <div>
+        <label for="subTopic">Topic</label>
+        <input type="text" id="subTopic" placeholder="ex: sport" value="sport">
+      </div>
+      <div>
+        <label for="subName">Nume subscriber (opțional)</label>
+        <input type="text" id="subName" placeholder="ex: S1 — reconectează cu același nume">
+      </div>
+    </div>
+    <button id="subConnect">Conectează</button>
+    <div class="hint">
+      Fără nume, subscriberul e „unic” — mesajele acumulate pentru el nu mai pot fi recuperate după deconectare.
+      Cu un nume, reconectezi „același” subscriber și primești tot ce a ratat.<br>
+      Pentru un al doilea Subscriber, rulează din nou <code>app.py</code> într-un alt terminal — va porni automat pe alt port, cu alt ID.
+    </div>
+  </div>
+
+  <div id="subCardWrap" style="margin-top:16px;"></div>
+</main>
+
+<script>
+function el(id){ return document.getElementById(id); }
+let since = 0;
+let connected = false;
+
+async function loadConfig(){
+  try{
+    const res = await fetch("/api/config");
+    const cfg = await res.json();
+    el("targetLabel").textContent = `${cfg.brokerHost}:${cfg.brokerTcpPort} (${(cfg.mode || "tcp").toUpperCase()})`;
+    el("instanceIdLabel").textContent = cfg.instanceId;
+    el("instancePortLabel").textContent = cfg.uiPort;
+  } catch(e){
+    el("targetLabel").textContent = "necunoscut";
+  }
+}
+
+function setStatus(online){
+  el("statusDot").className = "dot " + (online ? "on" : "off");
+  el("statusText").textContent = online ? "Server activ" : "Server indisponibil";
+}
+
+function fmtTime(iso){
+  if(!iso) return "";
+  try{ return new Date(iso).toLocaleTimeString(); } catch(e){ return iso; }
+}
+
+function subCardHtml(topic, subscriberId){
+  return `
+    <div class="sub-card">
+      <div class="sub-card-head">
+        <span class="dot" id="subdot"></span>
+        <span class="topic">${topic}</span>
+        <span class="id">${subscriberId}</span>
+        <span class="spacer"></span>
+        <span id="subcount" style="color:var(--text-dim); font-size:10.5px;">0 msg</span>
+        <button class="ghost" id="subDisconnect" style="padding:2px 10px; font-size:11px;">Deconectează</button>
+      </div>
+      <div class="sub-card-body" id="subbody">
+        <div class="empty">Se conectează la Broker...</div>
+      </div>
+    </div>
+  `;
+}
+
+async function connectSubscriber(){
+  const topic = el("subTopic").value.trim();
+  const name = el("subName").value.trim();
+  if(!topic) return;
+
+  const res = await fetch("/api/connect", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ topic, name })
+  });
+  const data = await res.json();
+  if(res.status >= 400){
+    alert(data.reason || "Nu s-a putut conecta.");
+    return;
+  }
+
+  since = 0;
+  connected = true;
+  el("connectForm").style.display = "none";
+  el("subCardWrap").innerHTML = subCardHtml(topic, data.subscriberId);
+  el("subDisconnect").addEventListener("click", disconnectSubscriber);
+}
+
+async function disconnectSubscriber(){
+  await fetch("/api/disconnect", { method: "POST" });
+  connected = false;
+  el("subCardWrap").innerHTML = "";
+  el("connectForm").style.display = "block";
+}
+
+async function pollMessages(){
+  if(!connected) return;
+  try{
+    const res = await fetch(`/api/messages?since=${since}`);
+    const data = await res.json();
+
+    const dot = el("subdot");
+    if(dot) dot.className = "dot " + (data.status === "connected" ? "connected" : data.status === "reconnecting" ? "reconnecting" : "");
+
+    if(data.messages && data.messages.length){
+      const body = el("subbody");
+      const emptyMsg = body.querySelector(".empty");
+      if(emptyMsg) body.innerHTML = "";
+      for(const m of data.messages){
+        const div = document.createElement("div");
+        div.className = "sub-msg";
+        div.innerHTML = `<div class="top"><span>#${m.index} · ${m.id ? m.id.slice(0,8) : "?"}</span><span>${fmtTime(m.timestamp)}</span></div>` +
+          `<pre>${typeof m.payload === "object" ? JSON.stringify(m.payload) : m.payload}</pre>`;
+        body.appendChild(div);
+      }
+      body.scrollTop = body.scrollHeight;
+      since = data.latest;
+      const countEl = el("subcount");
+      if(countEl) countEl.textContent = `${data.latest} msg`;
+    }
+  } catch(e){ /* silent, retried next tick */ }
+}
+
+async function pollStatus(){
+  try{
+    const res = await fetch("/api/instance");
+    if(!res.ok) throw new Error();
+    setStatus(true);
+  } catch(e){ setStatus(false); }
+}
+
+el("subConnect").addEventListener("click", connectSubscriber);
+
+loadConfig();
+pollStatus();
+setInterval(pollMessages, 1000);
+setInterval(pollStatus, 2000);
+</script>
+</body>
+</html>

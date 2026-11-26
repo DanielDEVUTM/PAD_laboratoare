@@ -1,0 +1,17 @@
+target/
+node_modules/
+dist/
+*.log
+.DS_Store
+orchestrator/src/main/resources/seed.js
+# Terraform state and variable files (they can contain secrets)
+.terraform/
+*.tfstate*
+*.tfvars
+# SSH keys and other private key files
+id_rsa*
+id_ed25519*
+pad_lab4*
+*.pem
+*.key
+*.ppk

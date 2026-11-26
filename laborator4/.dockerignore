@@ -1,0 +1,7 @@
+# context of the orchestrator image: it needs only orchestrator/ and infra/seed.js
+**/target
+**/node_modules
+**/dist
+**/.terraform
+terraform
+deploy

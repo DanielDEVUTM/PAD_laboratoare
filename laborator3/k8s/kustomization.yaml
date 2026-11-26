@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: pad-lab3
+resources:
+  - 00-namespace.yaml
+  - mongo.yaml
+  - redis.yaml
+  - gateway.yaml
+  - dw.yaml
+  - ui.yaml
+# the same scripts used by docker-compose (single source of truth)
+configMapGenerator:
+  - name: mongo-init-scripts
+    files:
+      - mongo-init.sh=../infra/mongo-init.sh
+      - seed.js=../infra/seed.js
+generatorOptions:
+  disableNameSuffixHash: true

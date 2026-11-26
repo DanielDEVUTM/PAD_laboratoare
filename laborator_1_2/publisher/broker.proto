@@ -1,0 +1,23 @@
+syntax = "proto3";
+package pubsub;
+
+service Broker {
+  rpc Publish(Message) returns (Ack);
+  rpc Subscribe(SubRequest) returns (stream Message);
+}
+
+message Message {
+  string id = 1;
+  string topic = 2;
+  string payload = 3;   // JSON serializat ca string
+  string timestamp = 4;
+}
+
+message Ack {
+  bool success = 1;
+  string detail = 2;
+}
+
+message SubRequest {
+  string topic = 1;
+}

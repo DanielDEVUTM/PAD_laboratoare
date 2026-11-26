@@ -1,0 +1,83 @@
+#cloud-config
+# First boot of the "${role}" instance: auto-stop, Docker, swap, NAT (edge) and the facts deploy.sh needs.
+ssh_authorized_keys: ${jsonencode(ssh_public_keys)}
+
+swap:
+  filename: /swapfile
+  size: 2G
+
+write_files:
+  - path: /etc/pad/infra.env
+    permissions: "0644"
+    content: |
+      EDGE_PRIVATE_IP=${edge_private_ip}
+      DATA_PRIVATE_IP=${data_private_ip}
+      SITE_ADDRESS=${site_address}
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      { "log-driver": "json-file", "log-opts": { "max-size": "10m", "max-file": "3" } }
+  # daily auto-stop: a forgotten instance does not keep consuming the credit
+  - path: /etc/systemd/system/pad-auto-stop.service
+    content: |
+      [Unit]
+      Description=Stop this instance
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/sbin/shutdown -h now
+  - path: /etc/systemd/system/pad-auto-stop.timer
+    content: |
+      [Unit]
+      Description=Daily auto-stop
+      [Timer]
+      OnCalendar=*-*-* ${auto_stop_time}:00 ${auto_stop_timezone}
+      AccuracySec=1min
+      [Install]
+      WantedBy=timers.target
+%{ if role == "edge" ~}
+  - path: /usr/local/sbin/pad-nat.sh
+    permissions: "0755"
+    encoding: b64
+    content: ${nat_script}
+  - path: /etc/sysctl.d/99-pad-nat.conf
+    content: |
+      net.ipv4.ip_forward=1
+  - path: /etc/systemd/system/pad-nat.service
+    content: |
+      [Unit]
+      Description=NAT for the private subnet
+      After=docker.service network-online.target
+      Requires=docker.service
+      PartOf=docker.service
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/sbin/pad-nat.sh ${private_cidr} ${vpc_cidr}
+      [Install]
+      WantedBy=multi-user.target
+%{ endif ~}
+  - path: /usr/local/sbin/pad-setup.sh
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      set -eu
+      # first, so that the instance stops even if the rest of the setup fails
+      systemctl daemon-reload
+      systemctl enable --now pad-auto-stop.timer
+      # retries: the network may still be changing (Elastic IP) or the NAT not ready yet
+      i=0
+      until command -v docker >/dev/null && docker compose version >/dev/null 2>&1; do
+        i=$((i + 1)); [ "$i" -le 90 ] || exit 1
+        apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-compose-v2 || sleep 10
+      done
+      systemctl enable docker
+      systemctl restart docker
+%{ if role == "edge" ~}
+      systemctl enable --now pad-nat.service
+%{ endif ~}
+      usermod -aG docker ubuntu
+      install -d -o ubuntu -g ubuntu -m 0750 /opt/pad
+      touch /etc/pad/ready
+
+runcmd:
+  - /usr/local/sbin/pad-setup.sh

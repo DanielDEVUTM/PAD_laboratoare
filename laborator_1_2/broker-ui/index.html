@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Broker Monitor</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#121927; --panel-2:#0f1521; --border:#232f45;
+    --text:#e7ecf5; --text-dim:#8a96ab; --accent:#4fd1c5;
+    --ok:#4ade80; --err:#f87171; --warn:#fbbf24; --mono:'Consolas','SFMono-Regular',Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,Segoe UI,Roboto,sans-serif;}
+  header{
+    display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    padding:14px 20px; border-bottom:1px solid var(--border); background:var(--panel-2);
+  }
+  header h1{font-size:16px; margin:0;}
+  header h1 span{color:var(--accent);}
+  .config{display:flex; align-items:center; gap:8px; font-size:12px;}
+  .config input{
+    background:var(--panel); border:1px solid var(--border); border-radius:6px; color:var(--text);
+    padding:6px 8px; font-size:12px; font-family:var(--mono); width:220px;
+  }
+  .config button{
+    background:var(--accent); color:#04231f; border:none; border-radius:6px; padding:6px 10px;
+    font-size:12px; font-weight:700; cursor:pointer;
+  }
+  .status{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim);}
+  .dot{width:8px; height:8px; border-radius:50%; background:var(--text-dim);}
+  .dot.on{background:var(--ok); box-shadow:0 0 6px var(--ok);}
+  .dot.off{background:var(--err); box-shadow:0 0 6px var(--err);}
+
+  main{max-width:1000px; margin:0 auto; padding:20px 16px 60px; display:flex; flex-direction:column; gap:20px;}
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:12px; overflow:hidden;}
+  .panel h2{
+    font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim);
+    margin:0; padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between;
+  }
+  .panel-body{padding:14px 16px;}
+
+  .table-scroll{overflow-x:auto;}
+  table{width:100%; min-width:320px; border-collapse:collapse; font-size:13px;}
+  th,td{text-align:left; padding:8px; border-bottom:1px solid var(--border); white-space:nowrap;}
+  th{color:var(--text-dim); font-weight:600; font-size:10.5px; text-transform:uppercase;}
+  td.num{font-variant-numeric:tabular-nums; text-align:right;}
+  .empty{color:var(--text-dim); font-size:12.5px; text-align:center; padding:20px 8px;}
+
+  .pill{font-size:10.5px; padding:2px 8px; border-radius:999px; background:var(--panel-2); border:1px solid var(--border);}
+  .pill.ok{color:var(--ok); border-color:var(--ok);}
+  .pill.warn{color:var(--warn); border-color:var(--warn);}
+
+  .row-del{background:transparent; color:var(--err); border:none; font-size:15px; cursor:pointer; padding:2px 6px;}
+
+  .dlq-item{border:1px solid var(--border); border-left:3px solid var(--err); border-radius:8px; padding:10px 12px; background:var(--panel-2); margin-bottom:8px; font-size:12px;}
+  .dlq-item .meta{color:var(--text-dim); font-family:var(--mono); font-size:10.5px; margin-bottom:4px;}
+  .dlq-item .reason{color:var(--err);}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Broker <span>Monitor</span></h1>
+  <div class="config">
+    <label>Admin API:</label>
+    <input type="text" id="adminUrl" value="http://127.0.0.1:5052">
+    <button id="saveUrl">Conectează</button>
+  </div>
+  <div class="status">
+    <span id="statusDot" class="dot"></span>
+    <span id="statusText">Verific...</span>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Topicuri active <span id="topicCount">0</span></h2>
+    <div class="panel-body table-scroll">
+      <table id="topicsTable">
+        <thead><tr><th>Topic</th><th class="num">Subs</th><th class="num">Backlog</th><th></th></tr></thead>
+        <tbody><tr><td colspan="4" class="empty">Se încarcă...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Subscriberi numiți (persistență) <span id="rosterCount">0</span></h2>
+    <div class="panel-body table-scroll">
+      <table id="rosterTable">
+        <thead><tr><th>Topic</th><th>Nume</th><th>Status</th><th class="num">În așteptare</th><th></th></tr></thead>
+        <tbody><tr><td colspan="5" class="empty">Se încarcă...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Dead Letter Queue <span id="dlqCount">0</span></h2>
+    <div class="panel-body" id="dlqList">
+      <div class="empty">Se încarcă...</div>
+    </div>
+  </section>
+</main>
+
+<script>
+function el(id){ return document.getElementById(id); }
+
+function loadUrl(){
+  return localStorage.getItem("brokerAdminUrl") || el("adminUrl").value;
+}
+
+el("adminUrl").value = loadUrl();
+el("saveUrl").addEventListener("click", () => {
+  localStorage.setItem("brokerAdminUrl", el("adminUrl").value.trim());
+  pollAll();
+});
+
+function setStatus(online){
+  el("statusDot").className = "dot " + (online ? "on" : "off");
+  el("statusText").textContent = online ? "Broker conectat" : "Broker indisponibil";
+}
+
+async function apiGet(path){
+  const base = el("adminUrl").value.trim().replace(/\/$/, "");
+  const res = await fetch(base + path);
+  if(!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+
+async function apiDelete(path){
+  const base = el("adminUrl").value.trim().replace(/\/$/, "");
+  return fetch(base + path, { method: "DELETE" });
+}
+
+async function deleteTopic(topic){
+  if(!confirm(`Ștergi topicul „${topic}”? Toți subscriberii lui vor fi deconectați.`)) return;
+  await apiDelete(`/api/topics/${encodeURIComponent(topic)}`);
+  pollAll();
+}
+
+async function deleteRosterSubscriber(topic, subscriberId){
+  if(!confirm(`Uiți subscriberul „${subscriberId}” de pe „${topic}”?`)) return;
+  await apiDelete(`/api/topics/${encodeURIComponent(topic)}/subscribers/${encodeURIComponent(subscriberId)}`);
+  pollAll();
+}
+
+async function pollTopics(){
+  const data = await apiGet("/api/topics");
+  el("topicCount").textContent = data.length;
+  const tbody = document.querySelector("#topicsTable tbody");
+  if(!data.length){
+    tbody.innerHTML = `<tr><td colspan="4" class="empty">Niciun topic încă</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = data.map(t => `
+    <tr>
+      <td>${t.name}</td>
+      <td class="num">${t.subscriberCount}</td>
+      <td class="num">${t.backlogSize}</td>
+      <td><button class="row-del" data-del-topic="${t.name}">🗑</button></td>
+    </tr>`).join("");
+  tbody.querySelectorAll("[data-del-topic]").forEach(btn =>
+    btn.addEventListener("click", () => deleteTopic(btn.dataset.delTopic)));
+}
+
+async function pollRoster(){
+  const data = await apiGet("/api/subscriber-roster");
+  el("rosterCount").textContent = data.length;
+  const tbody = document.querySelector("#rosterTable tbody");
+  if(!data.length){
+    tbody.innerHTML = `<tr><td colspan="5" class="empty">Niciun subscriber numit încă</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = data.slice().sort((a,b) => (a.topic+a.subscriberId).localeCompare(b.topic+b.subscriberId)).map(s => `
+    <tr>
+      <td>${s.topic}</td>
+      <td>${s.subscriberId}</td>
+      <td>${s.connected ? '<span class="pill ok">online</span>' : '<span class="pill warn">offline</span>'}</td>
+      <td class="num">${s.pendingCount > 0 ? `<span class="pill warn">${s.pendingCount}</span>` : '—'}</td>
+      <td><button class="row-del" data-del-topic="${s.topic}" data-del-id="${s.subscriberId}">🗑</button></td>
+    </tr>`).join("");
+  tbody.querySelectorAll("[data-del-id]").forEach(btn =>
+    btn.addEventListener("click", () => deleteRosterSubscriber(btn.dataset.delTopic, btn.dataset.delId)));
+}
+
+async function pollDlq(){
+  const data = await apiGet("/api/dlq");
+  el("dlqCount").textContent = data.length;
+  const list = el("dlqList");
+  if(!data.length){
+    list.innerHTML = `<div class="empty">Gol — nimic nu a eșuat definitiv.</div>`;
+    return;
+  }
+  list.innerHTML = data.slice().reverse().map(e => `
+    <div class="dlq-item">
+      <div class="meta">${e.timestamp} · topic: ${e.topic}</div>
+      <div class="reason">${e.reason}</div>
+    </div>`).join("");
+}
+
+async function pollAll(){
+  try{
+    await Promise.all([pollTopics(), pollRoster(), pollDlq()]);
+    setStatus(true);
+  } catch(e){
+    setStatus(false);
+  }
+}
+
+pollAll();
+setInterval(pollAll, 2000);
+</script>
+</body>
+</html>
