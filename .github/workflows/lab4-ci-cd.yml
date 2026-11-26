@@ -1,14 +1,14 @@
 # Lab 4 - CI/CD
-#   every push / pull request to main : unit tests, Terraform checks, linux/amd64 build, integration tests
-#   push to main                      : publish the images to GHCR and deploy them to AWS (after manual approval)
+#   every push   : unit tests, Terraform checks, linux/amd64 build, integration tests
+#   push to main : publish the images to GHCR and deploy them to AWS (after manual approval)
 name: lab4 CI/CD
 
-# every change starts the pipeline, on any branch that contains this file (no path filter)
+# Every change starts the pipeline, on any branch that contains this file (no path filter).
+# There is no pull_request trigger: a pull request shows the checks of the push run of the same commit,
+# so the same code is not tested twice. (Pull requests from forks are therefore not tested.)
 on:
   push:
     branches: ['**']
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -73,7 +73,7 @@ jobs:
 
   build:
     name: build linux/amd64, integration tests
-    needs: [test-java, test-ui]
+    # runs in parallel with the unit tests (faster); the deploy job waits for all of them
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -84,16 +84,77 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build the images
-        run: |
-          for service in dw-node gateway sync; do
-            docker build --platform linux/amd64 -t "lab4-$service" "./$service"
-          done
-          docker build --platform linux/amd64 -t lab4-orchestrator -f orchestrator/Dockerfile .
-          # behind the reverse proxy the UI calls the gateway on its own origin
-          docker build --platform linux/amd64 -t lab4-ui --build-arg VITE_GATEWAY_URL=/api ./ui
+      # separate builder only for the cached builds; plain `docker build` (used by the tests) keeps the default one
+      - uses: docker/setup-buildx-action@v4
+        id: buildx
+        with:
+          use: false
 
-      - name: Integration tests (single host, with failure injection)
+      # layers are kept between runs (GitHub Actions cache): dependencies are not downloaded every time
+      - name: Build dw-node
+        uses: docker/build-push-action@v7
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          context: laborator4/dw-node
+          platforms: linux/amd64
+          tags: lab4-dw-node:latest
+          load: true
+          provenance: false
+          cache-from: type=gha,scope=lab4-dw-node
+          cache-to: type=gha,scope=lab4-dw-node,mode=max
+
+      - name: Build gateway
+        uses: docker/build-push-action@v7
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          context: laborator4/gateway
+          platforms: linux/amd64
+          tags: lab4-gateway:latest
+          load: true
+          provenance: false
+          cache-from: type=gha,scope=lab4-gateway
+          cache-to: type=gha,scope=lab4-gateway,mode=max
+
+      - name: Build sync
+        uses: docker/build-push-action@v7
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          context: laborator4/sync
+          platforms: linux/amd64
+          tags: lab4-sync:latest
+          load: true
+          provenance: false
+          cache-from: type=gha,scope=lab4-sync
+          cache-to: type=gha,scope=lab4-sync,mode=max
+
+      - name: Build orchestrator
+        uses: docker/build-push-action@v7
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          context: laborator4
+          file: laborator4/orchestrator/Dockerfile
+          platforms: linux/amd64
+          tags: lab4-orchestrator:latest
+          load: true
+          provenance: false
+          cache-from: type=gha,scope=lab4-orchestrator
+          cache-to: type=gha,scope=lab4-orchestrator,mode=max
+
+      - name: Build ui
+        uses: docker/build-push-action@v7
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          context: laborator4/ui
+          build-args: VITE_GATEWAY_URL=/api   # the UI calls the gateway on its own origin
+          platforms: linux/amd64
+          tags: lab4-ui:latest
+          load: true
+          provenance: false
+          cache-from: type=gha,scope=lab4-ui
+          cache-to: type=gha,scope=lab4-ui,mode=max
+
+      # failure injection (frozen / stopped nodes, primary election) is slow: only on manual runs (Run workflow)
+      - name: Integration tests (single host)
         run: |
           INITIAL_WAREHOUSES=2 docker compose up -d --no-build
           for _ in $(seq 1 100); do
@@ -101,7 +162,7 @@ jobs:
             [ "$up" -ge 2 ] && break
             sleep 3
           done
-          ./scripts/smoke-test.sh --chaos
+          ./scripts/smoke-test.sh ${{ github.event_name == 'workflow_dispatch' && '--chaos' || '' }}
 
       - name: Logs of the failed cluster
         if: failure()
@@ -116,7 +177,7 @@ jobs:
 
       # the images that were just tested are the ones published
       - name: Log in to GitHub Container Registry
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -124,7 +185,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish the images
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main'
         run: |
           prefix="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/pad-lab4"
           for service in dw-node gateway sync orchestrator ui; do
@@ -134,9 +195,9 @@ jobs:
 
   deploy:
     name: deploy to AWS
-    needs: [build, infrastructure]
+    needs: [test-java, test-ui, infrastructure, build]
     # enabled by the repository variable DEPLOY_ENABLED=true, once the infrastructure exists
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-24.04
     # Continuous Delivery: add "required reviewers" to this environment to approve every deployment
     environment:

@@ -113,8 +113,12 @@ Pipeline-ul [lab4-ci-cd.yml](../.github/workflows/lab4-ci-cd.yml):
 
 | Când | Ce face |
 |---|---|
-| orice push (orice ramură care conține workflow-ul), orice PR spre `main` | teste unitare, verificare Terraform și scripturi, build `linux/amd64`, teste de integrare |
+| orice push (orice ramură care conține workflow-ul) | teste unitare, verificare Terraform și scripturi, build `linux/amd64`, teste de integrare |
 | push / merge pe `main` | toate cele de mai sus + publică imaginile în GHCR + deploy și verificare |
+
+Un PR afișează verificările rulării de push pentru același commit, deci codul nu e testat de două ori
+(PR-urile din fork-uri nu sunt testate). Straturile Docker se păstrează în cache între rulări.
+Testele cu noduri oprite sau înghețate (`--chaos`) rulează doar la pornirea manuală (*Run workflow*).
 
 Instanțele trebuie să fie **pornite** în momentul deploy-ului. După configurare: *Actions → lab4 CI/CD → Run workflow* pe `main`.
 
