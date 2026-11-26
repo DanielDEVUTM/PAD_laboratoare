@@ -7,3 +7,14 @@ env/
 bin/
 obj/
 *.user
+
+# arhiva locală, Terraform și chei SSH
+laborator3.zip
+.terraform/
+*.tfstate*
+*.tfvars
+id_rsa*
+id_ed25519*
+pad_lab4*
+*.pem
+*.ppk
