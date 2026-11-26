@@ -1,7 +1,7 @@
 # Laborator 4 — Aplicația în nori (AWS)
 
 Sistemul din [laboratorul 3](../laborator3/README.md) (proxy / Data Warehouse) mutat pe **2 instanțe EC2**
-(`eu-central-1`), cu infrastructura descrisă în **Terraform** și livrare prin **GitHub Actions**.
+(`eu-north-1`, Stockholm), cu infrastructura descrisă în **Terraform** și livrare prin **GitHub Actions**.
 Arhitectura aplicației (gateway, warehouse-uri, sync, cache) este descrisă în README-ul laboratorului 3.
 
 ## Diagrama
@@ -57,7 +57,7 @@ brew tap hashicorp/tap && brew install hashicorp/tap/terraform
 `AmazonEC2FullAccess` → după creare, **Security credentials → Create access key** (*Command Line Interface*).
 
 ```bash
-aws configure                  # access key, secret, regiune eu-central-1, output json
+aws configure                  # access key, secret, regiune eu-north-1, output json
 aws sts get-caller-identity    # trebuie să apară userul pad-terraform
 aws ec2 describe-instance-types --filters Name=free-tier-eligible,Values=true \
     --query 'InstanceTypes[].InstanceType' --output text      # tipurile eligibile Free Tier
@@ -67,6 +67,9 @@ ssh-keygen -t ed25519 -f ~/.ssh/pad_lab4_ci -N ''   # cheia pipeline-ului
 ```
 
 Cheile AWS și cheile SSH private nu se pun niciodată în repository.
+
+Regiunea: planul inițial era `eu-central-1`, dar pe acest cont un *service control policy* al organizației AWS o
+refuză (`UnauthorizedOperation ... explicit deny`). `eu-north-1` este permisă.
 
 ### 2. Infrastructura
 
@@ -138,21 +141,21 @@ terraform -chdir=terraform destroy     # șterge TOATE resursele (și datele): c
 
 Ambele instanțe se opresc singure zilnic la **23:00** (`auto_stop_time`).
 
-## Mărimea instanțelor și costul (eu-central-1, USD, prețuri on-demand la 26.11.2026)
+## Mărimea instanțelor și costul (eu-north-1, USD, prețuri on-demand la 26.11.2026)
 
 | Mod | VM-1 + VM-2 | Warehouse-uri | 4 h/zi (120 h/lună) | 24/7 |
 |---|---|---|---|---|
-| economic (implicit) | `t3.micro` + `t3.small` — 0,036 /h | 1 (2 merg doar cu swap) | **≈ 11,8 /lună** | ≈ 33,7 /lună |
-| prezentare | `t3.micro` + `c7i-flex.large` — 0,109 /h | 2–3 | ≈ 20,5 /lună | ≈ 86,9 /lună |
+| economic (implicit) | `t3.micro` + `t3.small` — 0,032 /h | 1 (2 merg doar cu swap) | **≈ 10,9 /lună** | ≈ 30,6 /lună |
+| prezentare | `t3.micro` + `c7i-flex.large` — 0,102 /h | 2–3 | ≈ 19,2 /lună | ≈ 81,1 /lună |
 
-În sume intră costurile fixe de **≈ 7,5 /lună**, plătite și cu instanțele oprite: Elastic IP (3,65) și 2 × 20 GB disc gp3 (3,81).
+În sume intră costurile fixe de **≈ 7,0 /lună**, plătite și cu instanțele oprite: Elastic IP (3,65) și 2 × 20 GB disc gp3 (3,34).
 Nu intră eventualul surplus de credit CPU la `t3` (`cpu_credits`). Schimbarea `data_instance_type` + `terraform apply`
 repornește instanța și păstrează discul. Planul Free AWS se închide după 6 luni sau la epuizarea creditului,
 iar accesul la resurse se pierde.
 
 Un warehouse nou se adaugă din UI. `INITIAL_WAREHOUSES` (implicit 1) contează doar când nu există niciunul.
 
-**Load Balancer:** nu este inclus. Un ALB ar costa ≈ 27 /lună fix (0,027 /h + 2 adrese IPv4 publice) plus trafic,
+**Load Balancer:** nu este inclus. Un ALB ar costa ≈ 25 /lună fix (0,024 /h + 2 adrese IPv4 publice) plus trafic,
 și cu instanțele oprite.
 
 ## Teste și rulare locală

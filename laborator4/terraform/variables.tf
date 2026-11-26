@@ -1,6 +1,7 @@
 variable "region" {
-  type    = string
-  default = "eu-central-1"
+  description = "AWS region. A service control policy on this account denies eu-central-1; eu-north-1 is allowed."
+  type        = string
+  default     = "eu-north-1"
 }
 
 variable "availability_zone" {

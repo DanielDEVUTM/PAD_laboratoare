@@ -1,5 +1,5 @@
 # copy to terraform.tfvars (ignored by git) and fill in
-region = "eu-central-1"
+region = "eu-north-1"
 
 ssh_public_keys = [
   "ssh-ed25519 AAAA... your key",

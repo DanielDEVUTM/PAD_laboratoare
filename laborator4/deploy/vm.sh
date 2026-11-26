@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Start / stop / show both EC2 instances (found by their tags). A stopped instance is not billed for
 # compute; its disk and the Elastic IP still are.
-#   ./deploy/vm.sh start|stop|status           (region: AWS_REGION, default eu-central-1)
+#   ./deploy/vm.sh start|stop|status           (region: AWS_REGION, default eu-north-1)
 set -euo pipefail
 action=${1:-status}
-region=${AWS_REGION:-eu-central-1}
+region=${AWS_REGION:-eu-north-1}
 
 aws_() { aws --region "$region" "$@"; }
 filters() { echo "Name=tag:Project,Values=pad-lab4" "Name=instance-state-name,Values=pending,running,stopping,stopped"; }
