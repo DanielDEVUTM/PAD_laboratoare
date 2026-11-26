@@ -13,7 +13,7 @@ function Member({ m, role, onState, busy }) {
   return (
     <div className={`flex items-center justify-between rounded-md border px-2.5 py-1.5 ${role === 'PRIMARY' && !down ? 'border-emerald-600/50 bg-emerald-500/5' : 'border-slate-800 bg-slate-950/60'}`}>
       <div>
-        <div className="mono text-[11px] text-slate-300">{m.container}</div>
+        <div className="mono text-[11px] text-slate-300">{m.container}{m.port && <span className="text-slate-500"> · localhost:{m.port}</span>}</div>
         <Badge tone={t}>{label}</Badge>
       </div>
       <div className="flex gap-1">

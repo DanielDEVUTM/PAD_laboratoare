@@ -40,6 +40,7 @@ public class WarehouseService {
     private final int initial;
     private final boolean publishPorts;
     private final int apiPortBase;
+    private final int dbPortBase;
     private final String seedScript;
     private final Map<String, String> phases = new ConcurrentHashMap<>();
     private final ExecutorService pool = Executors.newCachedThreadPool();
@@ -52,7 +53,9 @@ public class WarehouseService {
                             @Value("${orchestrator.sync-url}") String syncUrl,
                             @Value("${orchestrator.initial-warehouses}") int initial,
                             @Value("${orchestrator.publish-api-ports}") boolean publishPorts,
-                            @Value("${orchestrator.api-port-base}") int apiPortBase) throws Exception {
+                            @Value("${orchestrator.api-port-base}") int apiPortBase,
+                            @Value("${orchestrator.db-port-base}") int dbPortBase) throws Exception {
+        this.dbPortBase = dbPortBase;
         this.publishPorts = publishPorts;
         this.apiPortBase = apiPortBase;
         this.docker = docker;
@@ -97,8 +100,15 @@ public class WarehouseService {
                 }
                 w.put("api", api);
             } else {
-                members.computeIfAbsent(wh, k -> new ArrayList<>())
-                        .add(Map.of("container", name, "state", simpleState(c.getState())));
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("container", name);
+                m.put("state", simpleState(c.getState()));
+                String hp = c.getLabels().get(DockerOps.LABEL_HOSTPORT);
+                if (hp != null) {
+                    m.put("port", Integer.parseInt(hp));
+                    m.put("url", "mongodb://localhost:" + hp + "/warehouse?directConnection=true&readPreference=secondaryPreferred");
+                }
+                members.computeIfAbsent(wh, k -> new ArrayList<>()).add(m);
             }
         }
         members.forEach((wh, list) -> {
@@ -185,8 +195,13 @@ public class WarehouseService {
         phases.put(name, "starting 3 databases");
         docker.ensureImage(mongoImage);
         for (int i = 1; i <= DB_MEMBERS; i++) {
-            docker.createAndStart(dbName(name, i), name, "db", mongoImage, null,
-                    List.of("--replSet", rs, "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25"));
+            List<String> cmd = List.of("--replSet", rs, "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25");
+            if (publishPorts) {   // lets a client (Compass, Beekeeper, mongosh) connect straight to this member
+                int port = reservePort(dbName(name, i), dbPortBase);
+                docker.createAndStart(dbName(name, i), name, "db", mongoImage, null, cmd, port, 27017);
+            } else {
+                docker.createAndStart(dbName(name, i), name, "db", mongoImage, null, cmd);
+            }
         }
         for (int i = 1; i <= DB_MEMBERS; i++) {
             String c = dbName(name, i);
@@ -238,14 +253,14 @@ public class WarehouseService {
         }
         Exception last = null;
         for (int attempt = 0; attempt < 20; attempt++) {
-            int port = reservePort(name);
+            int port = reservePort(name + "-api", apiPortBase);
             try {
                 docker.createAndStart(name + "-api", name, "api", dwImage, env, null, port, 8080);
                 return;
             } catch (Exception e) {       // port taken by something else on the host: try the next one
                 last = e;
                 docker.remove(name + "-api");
-                releasePort(name);
+                releasePort(name + "-api");
                 blockedPorts.add(port);
             }
         }
@@ -255,20 +270,20 @@ public class WarehouseService {
     private final Map<String, Integer> reservedPorts = new ConcurrentHashMap<>();
     private final Set<Integer> blockedPorts = ConcurrentHashMap.newKeySet();
 
-    private synchronized int reservePort(String name) {
+    private synchronized int reservePort(String key, int base) {
         Set<Integer> used = new HashSet<>(blockedPorts);
         used.addAll(reservedPorts.values());
         for (Container c : docker.managed()) {
             String hp = c.getLabels().get(DockerOps.LABEL_HOSTPORT);
             if (hp != null) used.add(Integer.parseInt(hp));
         }
-        int p = apiPortBase;
+        int p = base;
         while (used.contains(p)) p++;
-        reservedPorts.put(name, p);
+        reservedPorts.put(key, p);
         return p;
     }
 
-    private void releasePort(String name) { reservedPorts.remove(name); }
+    private void releasePort(String key) { reservedPorts.remove(key); }
 
     private boolean syncReady(String name) {
         try {
