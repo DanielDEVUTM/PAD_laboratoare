@@ -109,21 +109,33 @@ la un repository privat; atunci controlul manual este variabila `DEPLOY_ENABLED`
 
 ### 4. Livrarea
 
-Pipeline-ul [lab4-ci-cd.yml](../.github/workflows/lab4-ci-cd.yml):
+Pipeline-urile [lab4-ci-cd.yml](../.github/workflows/lab4-ci-cd.yml) și
+[lab4-deploy.yml](../.github/workflows/lab4-deploy.yml) („lab4 deploy only”):
 
 | Când | Ce face |
 |---|---|
-| push pe `laborator4`, PR spre `main` | teste unitare, verificare Terraform și scripturi, build `linux/amd64`, teste de integrare |
-| push / merge pe `main` | toate cele de mai sus + publică imaginile în GHCR + deploy și verificare |
+| orice push (orice ramură care conține workflow-ul) | teste unitare, verificare Terraform și scripturi, build `linux/amd64`, teste de integrare, publicare în GHCR |
+| push / merge pe `main` | teste unitare și verificări; dacă imaginile există deja, **fără build și teste de integrare**; apoi deploy (cu aprobare) și verificare |
+| push pe `main` care schimbă doar `.github/` și/sau fișiere README | fără deploy |
+| manual: *lab4 deploy only* | deploy cu imaginile existente pentru tag-ul ales (cu aprobare) |
 
-Instanțele trebuie să fie **pornite** în momentul deploy-ului. După configurare: *Actions → lab4 CI/CD → Run workflow* pe `main`.
+**Build once, deploy many:** imaginile au ca tag *tree hash*-ul commit-ului (`git rev-parse 'HEAD^{tree}'`). Același
+conținut are același tag, deci merge-ul în `main` refolosește imaginile construite și testate pe ramură (dacă `main`
+nu are modificări proprii). O imagine se publică doar după ce toate testele au trecut, iar un tag nu se suprascrie.
+
+Un PR afișează verificările rulării de push pentru același commit, deci codul nu e testat de două ori
+(PR-urile din fork-uri nu sunt testate). Straturile Docker se păstrează în cache între rulări.
+Testele cu noduri oprite sau înghețate (`--chaos`) rulează doar la pornirea manuală (*Run workflow*).
+
+Instanțele trebuie să fie **pornite** în momentul deploy-ului. *lab4 deploy only* apare în *Actions* după ce fișierul
+ajunge în `main`; folosește-l și pentru revenirea la o versiune veche sau dacă un deploy nu a fost aprobat.
 
 Deploy manual (aceleași scripturi; `GHCR_TOKEN` = token GitHub cu `read:packages`):
 
 ```bash
 cd laborator4
 read -rs "ADMIN_PASSWORD?Parola aplicatiei: " && export ADMIN_PASSWORD     # zsh
-EDGE_HOST=<ip> SSH_KEY=~/.ssh/pad_lab4 IMAGE_PREFIX=ghcr.io/<owner-lowercase>/pad-lab4 TAG=<sha-commit> \
+EDGE_HOST=<ip> SSH_KEY=~/.ssh/pad_lab4 IMAGE_PREFIX=ghcr.io/<owner-lowercase>/pad-lab4 TAG=<tree-hash> \
   GHCR_USER=<user> GHCR_TOKEN=<token> ./deploy/deploy.sh
 BASE_URL=<url> ./deploy/verify.sh
 ```
