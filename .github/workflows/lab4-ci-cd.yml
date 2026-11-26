@@ -1,6 +1,8 @@
 # Lab 4 - CI/CD
-#   every push   : unit tests, Terraform checks, linux/amd64 build, integration tests
-#   push to main : publish the images to GHCR and deploy them to AWS (after manual approval)
+#   every push   : unit tests, Terraform checks, linux/amd64 build, integration tests, publish to GHCR
+#                  (the images are tagged with the tree hash of the commit: build once, deploy many)
+#   push to main : if the images of this tree are already published, no build and no integration tests;
+#                  then deploy (after manual approval), unless only .github/ or README files changed
 name: lab4 CI/CD
 
 # Every change starts the pipeline, on any branch that contains this file (no path filter).
@@ -19,6 +21,35 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      skip_build: ${{ steps.plan.outputs.skip_build }}
+      deploy: ${{ steps.plan.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the previous head is needed to see what the push changed
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: plan
+        shell: bash # with pipefail: a failing plan.sh fails the step
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          export IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/pad-lab4"
+          ./laborator4/deploy/plan.sh | tee -a "$GITHUB_OUTPUT"
+
   test-java:
     name: unit tests (${{ matrix.service }})
     runs-on: ubuntu-24.04
@@ -73,7 +104,9 @@ jobs:
 
   build:
     name: build linux/amd64, integration tests
-    # runs in parallel with the unit tests (faster); the deploy job waits for all of them
+    # after ALL tests: an image published in GHCR always comes from a content that passed them
+    needs: [plan, test-java, test-ui, infrastructure]
+    if: needs.plan.outputs.skip_build != 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -175,9 +208,8 @@ jobs:
       - name: Integration tests (cloud topology, proxy with password, rolling update)
         run: HOST_IP=$(hostname -I | awk '{print $1}') ./deploy/test-topology.sh
 
-      # the images that were just tested are the ones published
+      # the images that were just tested are the ones published; a published tag is never overwritten
       - name: Log in to GitHub Container Registry
-        if: github.ref == 'refs/heads/main'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -185,59 +217,36 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish the images
-        if: github.ref == 'refs/heads/main'
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
         run: |
           prefix="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/pad-lab4"
           for service in dw-node gateway sync orchestrator ui; do
-            docker tag "lab4-$service" "$prefix-$service:$GITHUB_SHA"
-            docker push "$prefix-$service:$GITHUB_SHA"
+            image="$prefix-$service:$TAG"
+            if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
+              echo "already published: $image"
+            else
+              docker tag "lab4-$service" "$image"
+              docker push "$image"
+            fi
           done
 
   deploy:
     name: deploy to AWS
-    needs: [test-java, test-ui, infrastructure, build]
-    # enabled by the repository variable DEPLOY_ENABLED=true, once the infrastructure exists
-    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
-    runs-on: ubuntu-24.04
-    # Continuous Delivery: add "required reviewers" to this environment to approve every deployment
-    environment:
-      name: production
-      url: ${{ vars.SITE_URL }}
-    concurrency:
-      group: lab4-deploy
+    needs: [plan, test-java, test-ui, infrastructure, build]
+    # main only; the build job may be skipped only because the images already exist.
+    # Enabled by the repository variable DEPLOY_ENABLED=true, once the infrastructure exists.
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+      && needs.plan.outputs.deploy == 'true'
+      && needs.test-java.result == 'success' && needs.test-ui.result == 'success'
+      && needs.infrastructure.result == 'success'
+      && (needs.build.result == 'success'
+          || (needs.build.result == 'skipped' && needs.plan.outputs.skip_build == 'true'))
     permissions:
       contents: read
       packages: read
-    defaults:
-      run:
-        working-directory: laborator4
-    env:
-      ADMIN_USER: ${{ vars.ADMIN_USER }}
-      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install the SSH key
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
-        run: |
-          install -m 600 /dev/null "$RUNNER_TEMP/key"
-          printf '%s\n' "$SSH_PRIVATE_KEY" > "$RUNNER_TEMP/key"
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/known_hosts"
-
-      - name: Deploy
-        env:
-          EDGE_HOST: ${{ vars.EDGE_HOST }}
-          SSH_KEY: ${{ runner.temp }}/key
-          SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/known_hosts
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          export IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/pad-lab4" TAG="$GITHUB_SHA"
-          ./deploy/deploy.sh
-
-      - name: Check the deployed system
-        env:
-          BASE_URL: ${{ vars.SITE_URL }}
-        run: ./deploy/verify.sh
+    uses: ./.github/workflows/lab4-deploy.yml
+    with:
+      tag: ${{ needs.plan.outputs.tag }}
+    secrets: inherit
