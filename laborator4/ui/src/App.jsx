@@ -36,7 +36,7 @@ export default function App() {
     <div className="mx-auto max-w-7xl px-4 py-6">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h1 className="text-xl font-semibold text-slate-50">Data Warehouse Console</h1>
+          <h1 className="text-xl font-semibold text-slate-50">PAD Data Warehouse Console</h1>
           <p className="text-sm text-slate-400">
             Lab 4 · cloud · all traffic goes through <span className="mono text-sky-300">{GATEWAY}</span>
           </p>
